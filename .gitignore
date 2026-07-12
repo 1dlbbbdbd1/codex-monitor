@@ -1,0 +1,8 @@
+.worktrees/
+work/
+outputs/
+__pycache__/
+*.py[cod]
+.venv/
+windows/build/
+windows/dist/
