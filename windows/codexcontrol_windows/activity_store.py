@@ -62,6 +62,7 @@ class ActivitySnapshot:
     tasks: dict[str, TaskProjection]
     applied_event_count: int
     rejected_event_count: int
+    applied_events: tuple[ActivityEvent, ...] = ()
 
 
 class ActivityStore:
@@ -97,6 +98,7 @@ class ActivityStore:
         complete = pending[: last_newline + 1]
         applied = 0
         rejected = 0
+        applied_events: list[ActivityEvent] = []
         for raw_line in complete.splitlines():
             if not raw_line.strip():
                 continue
@@ -119,9 +121,10 @@ class ActivityStore:
                 task.apply(event)
             self._remember_event_id(event_id)
             applied += 1
+            applied_events.append(event)
 
         self.byte_offset += len(complete)
-        return self._snapshot(applied, rejected)
+        return self._snapshot(applied, rejected, tuple(applied_events))
 
     def save(self) -> None:
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -167,8 +170,18 @@ class ActivityStore:
         removed = self._recent_event_ids.pop(0)
         self._recent_event_id_set.discard(removed)
 
-    def _snapshot(self, applied: int, rejected: int) -> ActivitySnapshot:
-        return ActivitySnapshot(tasks=dict(self.tasks), applied_event_count=applied, rejected_event_count=rejected)
+    def _snapshot(
+        self,
+        applied: int,
+        rejected: int,
+        applied_events: tuple[ActivityEvent, ...] = (),
+    ) -> ActivitySnapshot:
+        return ActivitySnapshot(
+            tasks=dict(self.tasks),
+            applied_event_count=applied,
+            rejected_event_count=rejected,
+            applied_events=applied_events,
+        )
 
     @staticmethod
     def _task_payload(task: TaskProjection) -> dict[str, Any]:

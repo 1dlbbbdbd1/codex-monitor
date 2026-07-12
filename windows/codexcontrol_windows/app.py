@@ -17,11 +17,17 @@ from PIL import Image, ImageDraw, ImageTk
 import pystray
 
 from .account_manager import CodexAccountManager, CodexAccountManagerError, ManagedLoginProcess
+from .activity_models import aggregate_tasks
+from .activity_store import ActivitySnapshot, ActivityStore
 from .brand_icon import build_orbit_dial_icon
 from .codex_api import AuthBackedIdentity
 from .codex_api import fetch_snapshot
 from .codex_desktop import CodexDesktopControlError, restart_codex_desktop
+from .codex_navigation import CodexNavigator
+from .floating_overlay import FloatingOverlay, QuotaRow, build_overlay_view_model
+from .hook_installer import HookInstaller
 from .models import AccountRuntimeState, AccountUsageSnapshot, RemovedAccountIdentity, StoredAccount, StoredAccountSource, utc_now
+from .notification_state import NotificationState
 from .presentation_logic import account_sort_key, is_active_account
 from .stores import AccountStore, SnapshotStore
 
@@ -318,11 +324,15 @@ class CodexControlWindowsApp:
     SEARCH_RENDER_MS = 80
     CARD_RENDER_BATCH_ROWS = 2
     ELLIPSIS_CACHE_MAX = 4096
+    ACTIVITY_POLL_MS = 500
 
     def __init__(self, start_hidden: bool = False) -> None:
         self.account_store = AccountStore()
         self.snapshot_store = SnapshotStore()
         self.account_manager = CodexAccountManager()
+        self.activity_store = ActivityStore()
+        self.notification_state = NotificationState()
+        self.navigator = CodexNavigator()
         worker_count = min(12, max(4, (os.cpu_count() or 4) * 2))
         self.executor = ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="codexcontrol")
         self.events: queue.Queue[tuple[Any, ...]] = queue.Queue()
@@ -351,6 +361,10 @@ class CodexControlWindowsApp:
         self._auto_refresh_job: str | None = None
         self._initial_refresh_job: str | None = None
         self._restart_desktop_job: str | None = None
+        self._activity_poll_job: str | None = None
+        self._activity_poll_inflight = False
+        self._activity_snapshot = ActivitySnapshot(tasks=dict(self.activity_store.tasks), applied_event_count=0, rejected_event_count=0)
+        self._activity_health = "等待 Codex 事件"
         self._cards_render_token = 0
         self._last_render_width = 0
         self._accounts_revision = 0
@@ -404,6 +418,16 @@ class CodexControlWindowsApp:
         self._apply_dark_title_bar()
         self._setup_tray_icon()
         self._load_initial_state()
+        for state in self.runtime_states.values():
+            if state.snapshot is not None:
+                self.notification_state.observe_quota(state.snapshot, observed_at=state.snapshot.updated_at)
+        self.floating_overlay = FloatingOverlay(
+            self.root,
+            on_refresh=self.refresh_all,
+            on_task_open=self._open_companion_task,
+            on_panel_viewed=self._acknowledge_companion_panel,
+        )
+        self._overlay_visible = self.floating_overlay.settings.overlay_enabled
         self._render_now()
         if self.start_hidden:
             self.hide_window()
@@ -412,6 +436,9 @@ class CodexControlWindowsApp:
         self._queue_poll_job = self.root.after(self.QUEUE_POLL_MS, self._process_event_queue)
         self._initial_refresh_job = self.root.after(800, self.refresh_all)
         self._auto_refresh_job = self.root.after(self.AUTO_REFRESH_MS, self._auto_refresh_tick)
+        self._activity_poll_job = self.root.after(100, self._activity_poll_tick)
+        if self._overlay_visible:
+            self.floating_overlay.show()
 
     def run(self) -> None:
         self.root.mainloop()
@@ -428,6 +455,7 @@ class CodexControlWindowsApp:
             "_auto_refresh_job",
             "_initial_refresh_job",
             "_restart_desktop_job",
+            "_activity_poll_job",
         ):
             job = getattr(self, job_name, None)
             if job is None:
@@ -442,6 +470,7 @@ class CodexControlWindowsApp:
                 self.tray_icon.stop()
             except Exception:
                 pass
+        self.floating_overlay.destroy()
         self.executor.shutdown(wait=False, cancel_futures=True)
         self.root.destroy()
 
@@ -864,7 +893,12 @@ class CodexControlWindowsApp:
                 lambda _: "Hide Window" if self.root.state() != "withdrawn" else "Show Window",
                 lambda icon, item: self.root.after(0, self._toggle_window),
             ),
+            pystray.MenuItem(
+                lambda _: "隐藏悬浮助手" if getattr(self, "_overlay_visible", True) else "显示悬浮助手",
+                lambda icon, item: self.root.after(0, self._toggle_floating_overlay),
+            ),
             pystray.MenuItem("Refresh All", lambda icon, item: self.root.after(0, self.refresh_all)),
+            pystray.MenuItem("修复 Codex 状态连接", lambda icon, item: self.root.after(0, self._repair_companion_integration)),
             pystray.MenuItem("Add Account", lambda icon, item: self.root.after(0, self.start_add_account)),
             pystray.MenuItem("Quit", lambda icon, item: self.root.after(0, self.quit)),
         )
@@ -958,6 +992,9 @@ class CodexControlWindowsApp:
             elif name == "reauth_result":
                 _, account_id, account, error = event
                 self._apply_reauth_result(account_id, account, error)
+            elif name == "activity_poll_result":
+                _, snapshot, error = event
+                self._apply_activity_poll_result(snapshot, error)
 
         if not self._quitting:
             self._queue_poll_job = self.root.after(self.QUEUE_POLL_MS, self._process_event_queue)
@@ -977,6 +1014,7 @@ class CodexControlWindowsApp:
             state.error_message = None
             self.runtime_states[account_id] = state
             self._update_account_metadata(account_id, snapshot)
+            self.notification_state.observe_quota(snapshot, observed_at=snapshot.updated_at)
         else:
             state.snapshot = None
             state.error_message = str(error) if error else "Unknown refresh error."
@@ -1126,6 +1164,105 @@ class CodexControlWindowsApp:
         message = state.error_message.lower()
         return "refresh token" in message and "sign in again" in message
 
+    def _activity_poll_tick(self) -> None:
+        self._activity_poll_job = None
+        if self._quitting or self._activity_poll_inflight:
+            return
+        self._activity_poll_inflight = True
+        self._submit_future(self.executor.submit(self.activity_store.poll), "activity_poll_result")
+
+    def _apply_activity_poll_result(
+        self,
+        snapshot: ActivitySnapshot | None,
+        error: Exception | None,
+    ) -> None:
+        self._activity_poll_inflight = False
+        if snapshot is not None:
+            self._activity_snapshot = snapshot
+            for activity_event in snapshot.applied_events:
+                self.notification_state.observe_activity(activity_event)
+            if snapshot.applied_event_count:
+                try:
+                    self.activity_store.save()
+                except OSError:
+                    pass
+            if snapshot.rejected_event_count:
+                self._activity_health = f"已连接 · 忽略 {snapshot.rejected_event_count} 条异常事件"
+            elif self.activity_store.events_path.exists():
+                self._activity_health = "Codex 状态连接正常"
+            self._render()
+        elif error is not None:
+            self._activity_health = "Codex 状态连接异常"
+            self._render()
+        if not self._quitting:
+            self._activity_poll_job = self.root.after(self.ACTIVITY_POLL_MS, self._activity_poll_tick)
+
+    def _update_floating_overlay(self) -> None:
+        tasks = tuple(self._activity_snapshot.tasks.values())
+        model = build_overlay_view_model(
+            aggregate=aggregate_tasks(tasks),
+            badge=self.notification_state.badge,
+            quota_rows=self._companion_quota_rows(),
+            tasks=tasks,
+            health_text=self._activity_health,
+        )
+        self.floating_overlay.update(model)
+
+    def _companion_quota_rows(self) -> tuple[QuotaRow, ...]:
+        candidates = [
+            (account, self.runtime_states.get(account.id, AccountRuntimeState()).snapshot)
+            for account in self.accounts
+        ]
+        available = [(account, snapshot) for account, snapshot in candidates if snapshot is not None]
+        if not available:
+            return ()
+        selected = next(((account, snapshot) for account, snapshot in available if self._is_active_account(account)), available[0])
+        account, snapshot = selected
+        assert snapshot is not None
+        return tuple(
+            QuotaRow(
+                label=f"{account.display_name} · {window.short_label}",
+                remaining_percent=window.remaining_percent,
+                reset_text=window.compact_reset_at_display or "刷新时间未知",
+            )
+            for window in (snapshot.primary_window, snapshot.secondary_window)
+            if window is not None
+        )
+
+    def _acknowledge_companion_panel(self) -> None:
+        self.notification_state.acknowledge_panel_view()
+        self._update_floating_overlay()
+
+    def _open_companion_task(self, thread_id: str) -> None:
+        task = self._activity_snapshot.tasks.get(thread_id)
+        if task is None:
+            return
+        result = self.navigator.open_task(task)
+        if not result.succeeded:
+            self.status_message = "未找到可激活的 Codex 窗口。"
+            self._render()
+
+    def _toggle_floating_overlay(self) -> None:
+        self._overlay_visible = not self._overlay_visible
+        if self._overlay_visible:
+            self.floating_overlay.show()
+        else:
+            self.floating_overlay.hide()
+        if self.tray_icon is not None:
+            try:
+                self.tray_icon.update_menu()
+            except Exception:
+                pass
+
+    def _repair_companion_integration(self) -> None:
+        executable = Path(sys.executable if getattr(sys, "frozen", False) else sys.argv[0]).resolve()
+        try:
+            HookInstaller().install(executable)
+            self._activity_health = "Codex 状态连接已修复，下一次操作后生效"
+        except Exception as error:
+            self._activity_health = f"修复失败：{error}"
+        self._render()
+
     def _replace_or_append_account(self, account: StoredAccount) -> None:
         replaced = False
         for index, existing in enumerate(self.accounts):
@@ -1194,6 +1331,7 @@ class CodexControlWindowsApp:
         self._render_metrics(presentation)
         self._render_cards(presentation)
         self._update_tray(presentation)
+        self._update_floating_overlay()
 
     def _render_metrics(self, presentation: PresentationState) -> None:
         if not self._metric_value_labels:

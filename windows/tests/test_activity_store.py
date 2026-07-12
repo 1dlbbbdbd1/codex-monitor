@@ -63,6 +63,10 @@ class ActivityStoreTests(unittest.TestCase):
         self.assertEqual(snapshot.applied_event_count, 2)
         self.assertEqual(snapshot.rejected_event_count, 0)
         self.assertEqual(snapshot.tasks["thread-a"].status, ActivityStatus.WAITING_APPROVAL)
+        self.assertEqual(
+            [event.event_type for event in snapshot.applied_events],
+            [EventType.TURN_STARTED, EventType.APPROVAL_REQUESTED],
+        )
 
     def test_duplicate_event_id_is_applied_once(self) -> None:
         duplicate = event(1, EventType.TURN_STARTED)
