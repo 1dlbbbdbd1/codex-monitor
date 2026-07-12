@@ -59,4 +59,4 @@ powershell -ExecutionPolicy Bypass -File .\windows\package_release.ps1 -Clean -P
 - 2026-07-13：完成活动模型、JSONL 桥、通知状态机、Codex hooks 安装器与薄插件骨架。
 - 2026-07-13：完成多屏定位、悬浮球、展开面板、额度/活动集成、托盘导航；70 项测试通过。
 - 2026-07-13：完成 Windows x64 单文件 EXE、安装/卸载脚本、插件目录与 ZIP；修复 Tk 打包缺失并用发布 EXE 实机捕获悬浮球像素。
-- 2026-07-13：v0.1.0 Demo 开发与本地发布验收完成，目标仓库为 [1dlbbbdbd1/codex-monitor](https://github.com/1dlbbbdbd1/codex-monitor)。
+- 2026-07-13：v0.1.0 Demo 开发与本地发布验收完成。
