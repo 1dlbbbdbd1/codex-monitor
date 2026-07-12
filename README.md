@@ -1,5 +1,9 @@
 # Codex 桌面悬浮状态与额度助手
 
+## Upstream
+
+The quota/account foundation is derived from [ademisler/codexcontrol](https://github.com/ademisler/codexcontrol) under the MIT License. The imported source commit is recorded in Git history and `UPSTREAM.md`.
+
 ## 项目目标
 
 为 Codex 桌面端寻找或开发一个轻量常驻助手，优先满足：
