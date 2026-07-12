@@ -10,6 +10,7 @@ from tempfile import TemporaryDirectory
 from codexcontrol_windows.activity_models import EventType
 from codexcontrol_windows.activity_store import ActivityStore
 from codexcontrol_windows.bridge_cli import dispatch, main, normalize_hook_payload
+from codexcontrol_windows.hook_installer import HookInstaller, count_companion_hooks
 
 
 NOW = datetime(2026, 7, 12, 12, 0, tzinfo=timezone.utc)
@@ -110,6 +111,34 @@ class BridgeMainTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertEqual(gui_calls, [])
             self.assertTrue(events.exists())
+
+    def test_dispatch_installs_and_uninstalls_hooks_without_starting_gui(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            hooks = root / "hooks.json"
+            installer = HookInstaller(hooks, root / "backups")
+            gui_calls: list[list[str]] = []
+
+            install_code = dispatch(
+                ["--install-hooks"],
+                io.StringIO(""),
+                lambda argv: gui_calls.append(argv),
+                hook_installer=installer,
+                executable=root / "CodexFloatingCompanion.exe",
+            )
+            installed = json.loads(hooks.read_text(encoding="utf-8"))
+            uninstall_code = dispatch(
+                ["--uninstall-hooks"],
+                io.StringIO(""),
+                lambda argv: gui_calls.append(argv),
+                hook_installer=installer,
+            )
+            uninstalled = json.loads(hooks.read_text(encoding="utf-8"))
+
+            self.assertEqual((install_code, uninstall_code), (0, 0))
+            self.assertEqual(count_companion_hooks(installed), 4)
+            self.assertEqual(count_companion_hooks(uninstalled), 0)
+            self.assertEqual(gui_calls, [])
 
 
 if __name__ == "__main__":

@@ -100,7 +100,7 @@ def build_overlay_view_model(
         count_text=str(count) if count else "",
         badge_visible=badge.visible,
         badge_color="#ef4444" if urgent_badge else "#38bdf8",
-        keep_handle_visible=badge.approval,
+        keep_handle_visible=badge.visible,
         quota_rows=tuple(quota_rows),
         task_rows=task_rows,
         health_text=health_text,
@@ -185,9 +185,14 @@ class FloatingOverlay:
 
     def update(self, model: OverlayViewModel) -> None:
         self.model = model
-        self._render_ball()
-        if model.keep_handle_visible:
-            self._reveal()
+        hidden_edge = None
+        if (
+            self.window.state() == "normal"
+            and self._placement.edge is not None
+            and self.window.winfo_x() != self._placement.position.x
+        ):
+            hidden_edge = self._placement.edge
+        self._render_ball(hidden_edge)
         if self._panel is not None and self._panel.winfo_exists():
             self._render_panel()
 
@@ -206,7 +211,7 @@ class FloatingOverlay:
         self._render_panel()
         self.on_panel_viewed()
 
-    def _render_ball(self) -> None:
+    def _render_ball(self, hidden_edge: DockEdge | None = None) -> None:
         self.canvas.delete("all")
         image = build_orbit_dial_icon(BALL_SIZE, accent=self.model.accent_color)
         self._icon = ImageTk.PhotoImage(image)
@@ -220,7 +225,13 @@ class FloatingOverlay:
                 font=("Segoe UI Semibold", 10),
             )
         if self.model.badge_visible:
-            self.canvas.create_oval(40, 3, 54, 17, fill=self.model.badge_color, outline="#ffffff", width=2)
+            if hidden_edge is DockEdge.RIGHT:
+                bounds = (1, 21, 13, 33)
+            elif hidden_edge is DockEdge.LEFT:
+                bounds = (43, 21, 55, 33)
+            else:
+                bounds = (40, 3, 54, 17)
+            self.canvas.create_oval(*bounds, fill=self.model.badge_color, outline="#ffffff", width=2)
 
     def _render_panel(self) -> None:
         assert self._panel is not None
@@ -335,10 +346,11 @@ class FloatingOverlay:
         self._cancel_hide()
         point = self._placement.position
         self.window.geometry(f"+{point.x}+{point.y}")
+        self._render_ball()
 
     def _schedule_hide(self) -> None:
         self._cancel_hide()
-        if not self.settings.auto_hide or self._placement.edge is None or self.model.keep_handle_visible or self._panel is not None:
+        if not self.settings.auto_hide or self._placement.edge is None or self._panel is not None:
             return
         self._hide_job = self.window.after(2000, self._hide_to_edge)
 
@@ -356,6 +368,7 @@ class FloatingOverlay:
             return
         monitor = next((item for item in _enumerate_monitors(self.parent) if item.name == self._placement.monitor_name), self._current_monitor(self._placement.position.x, self._placement.position.y))
         target = hidden_target(monitor.work_area, Size(BALL_SIZE, BALL_SIZE), self._placement.edge, y=self._placement.position.y)
+        self._render_ball(self._placement.edge)
         self.window.geometry(f"+{target.x}+{target.y}")
 
     def _position_panel(self) -> None:

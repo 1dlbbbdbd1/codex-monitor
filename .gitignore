@@ -4,5 +4,7 @@ outputs/
 __pycache__/
 *.py[cod]
 .venv/
+.packaging-venv/
 windows/build/
 windows/dist/
+windows/*.spec

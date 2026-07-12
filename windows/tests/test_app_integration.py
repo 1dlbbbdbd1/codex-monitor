@@ -54,7 +54,7 @@ class OverlayViewModelTests(unittest.TestCase):
         self.assertEqual(model.quota_rows[0].remaining_text, "73%")
         self.assertEqual(model.task_rows[0].title, "构建第一版悬浮球")
 
-    def test_informational_badge_is_blue_and_does_not_force_visible_handle(self) -> None:
+    def test_informational_badge_is_blue_and_keeps_a_visible_edge_indicator(self) -> None:
         model = build_overlay_view_model(
             aggregate=AggregateStatus(ActivityStatus.COMPLETED, 0, 0),
             badge=BadgeState(completion=True, quota_reset=True),
@@ -64,7 +64,7 @@ class OverlayViewModelTests(unittest.TestCase):
         )
 
         self.assertEqual(model.badge_color, "#38bdf8")
-        self.assertFalse(model.keep_handle_visible)
+        self.assertTrue(model.keep_handle_visible)
         self.assertEqual(model.health_text, "等待 Codex 事件")
 
 

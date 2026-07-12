@@ -11,6 +11,7 @@ from uuid import uuid4
 from .activity_models import ActivityEvent, ActivityValidationError, EventType
 from .activity_store import append_event
 from .file_locations import ACTIVITY_EVENTS_FILE
+from .hook_installer import HookInstaller
 
 
 _HOOK_EVENT_MAP = {
@@ -73,9 +74,23 @@ def dispatch(
     gui_main: Callable[[list[str]], None],
     *,
     now: datetime | None = None,
+    hook_installer: HookInstaller | None = None,
+    executable: Path | None = None,
 ) -> int:
     if "--emit-hook" in argv:
         bridge_arguments = [argument for argument in argv if argument != "--emit-hook"]
         return main(bridge_arguments, stdin, now=now)
+    if "--install-hooks" in argv:
+        try:
+            (hook_installer or HookInstaller()).install(executable or Path(sys.executable))
+            return 0
+        except Exception:
+            return 1
+    if "--uninstall-hooks" in argv:
+        try:
+            (hook_installer or HookInstaller()).uninstall()
+            return 0
+        except Exception:
+            return 1
     gui_main(argv)
     return 0

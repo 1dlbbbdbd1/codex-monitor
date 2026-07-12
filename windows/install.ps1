@@ -5,39 +5,28 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-
-function Stop-CodexControlInstances {
-    $processes = Get-CimInstance Win32_Process | Where-Object {
-        $_.Name -ieq "CodexControl.exe" -or (
-            $_.Name -match "^pythonw?\.exe$" -and
-            $_.CommandLine -match "CodexControlWindows\.pyw"
-        )
-    }
-
-    foreach ($process in $processes) {
-        Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
-    }
-}
-
 $windowsRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 if ([string]::IsNullOrWhiteSpace($SourceExe)) {
-    $SourceExe = Join-Path $windowsRoot "dist\CodexControl.exe"
+    $SourceExe = Join-Path $windowsRoot "dist\CodexFloatingCompanion.exe"
 }
-
 if (-not (Test-Path -LiteralPath $SourceExe)) {
     throw "EXE not found: $SourceExe"
 }
 
-$installDir = Join-Path $env:LOCALAPPDATA "Programs\CodexControl"
-$installedExe = Join-Path $installDir "CodexControl.exe"
+$installDir = Join-Path $env:LOCALAPPDATA "Programs\CodexFloatingCompanion"
+$installedExe = Join-Path $installDir "CodexFloatingCompanion.exe"
 $startupDir = [Environment]::GetFolderPath("Startup")
-$startupShortcut = Join-Path $startupDir "CodexControl.lnk"
+$startupShortcut = Join-Path $startupDir "CodexFloatingCompanion.lnk"
 
-Stop-CodexControlInstances
-Start-Sleep -Milliseconds 500
-
+Get-Process -Name "CodexFloatingCompanion" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 300
 New-Item -ItemType Directory -Path $installDir -Force | Out-Null
 Copy-Item -LiteralPath $SourceExe -Destination $installedExe -Force
+
+& $installedExe --install-hooks
+if ($LASTEXITCODE -ne 0) {
+    throw "Codex hooks installation failed. Existing hooks were left intact."
+}
 
 if ($EnableStartup) {
     $shell = New-Object -ComObject WScript.Shell
@@ -46,17 +35,15 @@ if ($EnableStartup) {
     $shortcut.Arguments = "--hidden"
     $shortcut.WorkingDirectory = $installDir
     $shortcut.IconLocation = $installedExe
-    $shortcut.Description = "Launch CodexControl at sign-in"
+    $shortcut.Description = "Launch Codex Floating Companion at sign-in"
     $shortcut.Save()
 } elseif (Test-Path -LiteralPath $startupShortcut) {
     Remove-Item -LiteralPath $startupShortcut -Force
 }
 
 if ($Launch) {
-    Start-Process -FilePath $installedExe -WorkingDirectory $installDir
+    Start-Process -FilePath $installedExe -ArgumentList "--hidden" -WorkingDirectory $installDir -WindowStyle Hidden
 }
 
 Write-Output "Installed: $installedExe"
-if ($EnableStartup) {
-    Write-Output "Startup shortcut: $startupShortcut"
-}
+Write-Output "Codex activity hooks: installed"
