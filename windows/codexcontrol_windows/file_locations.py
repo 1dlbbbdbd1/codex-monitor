@@ -20,6 +20,11 @@ def localappdata_directory() -> Path:
 
 
 APP_SUPPORT_DIRECTORY = appdata_directory() / "CodexControl"
+COMPANION_SUPPORT_DIRECTORY = appdata_directory() / "CodexFloatingCompanion"
+ACTIVITY_EVENTS_FILE = COMPANION_SUPPORT_DIRECTORY / "activity-events.jsonl"
+ACTIVITY_STATE_FILE = COMPANION_SUPPORT_DIRECTORY / "activity-state.json"
+COMPANION_SETTINGS_FILE = COMPANION_SUPPORT_DIRECTORY / "settings.json"
+COMPANION_LOG_DIRECTORY = COMPANION_SUPPORT_DIRECTORY / "logs"
 LEGACY_APP_SUPPORT_DIRECTORIES = [
     appdata_directory() / "".join(["Codex", "Gauge"]),
     appdata_directory() / "".join(["Codex", "Accounts"]),
@@ -71,5 +76,7 @@ def ensure_directories() -> None:
                 break
 
     APP_SUPPORT_DIRECTORY.mkdir(parents=True, exist_ok=True)
+    COMPANION_SUPPORT_DIRECTORY.mkdir(parents=True, exist_ok=True)
+    COMPANION_LOG_DIRECTORY.mkdir(parents=True, exist_ok=True)
     MANAGED_HOMES_DIRECTORY.mkdir(parents=True, exist_ok=True)
     AUTH_BACKUPS_DIRECTORY.mkdir(parents=True, exist_ok=True)

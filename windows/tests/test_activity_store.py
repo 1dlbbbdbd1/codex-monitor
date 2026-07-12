@@ -1,0 +1,120 @@
+from __future__ import annotations
+
+import json
+import unittest
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from uuid import UUID
+
+from codexcontrol_windows.activity_models import ActivityEvent, ActivityStatus, EventType
+from codexcontrol_windows.activity_store import ActivityStore, append_event
+
+
+NOW = datetime(2026, 7, 12, 12, 0, tzinfo=timezone.utc)
+
+
+def event(event_id: int, event_type: EventType, *, thread_id: str = "thread-a") -> ActivityEvent:
+    return ActivityEvent(
+        schema_version=1,
+        event_id=UUID(int=event_id),
+        event_type=event_type,
+        thread_id=thread_id,
+        turn_id="turn-a",
+        task_title="Build companion",
+        project_name="Companion",
+        cwd="C:/work/companion",
+        occurred_at=NOW + timedelta(seconds=event_id),
+        source="hook",
+    )
+
+
+def payload(event_id: int, event_type: str, *, thread_id: str = "thread-a") -> dict[str, object]:
+    return {
+        "schemaVersion": 1,
+        "eventId": str(UUID(int=event_id)),
+        "eventType": event_type,
+        "threadId": thread_id,
+        "turnId": "turn-a",
+        "taskTitle": "Build companion",
+        "projectName": "Companion",
+        "cwd": "C:/work/companion",
+        "occurredAt": (NOW + timedelta(seconds=event_id)).isoformat().replace("+00:00", "Z"),
+        "source": "hook",
+    }
+
+
+class ActivityStoreTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.events = self.root / "activity-events.jsonl"
+        self.state = self.root / "activity-state.json"
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def test_append_and_poll_projects_task_state(self) -> None:
+        append_event(self.events, event(1, EventType.TURN_STARTED))
+        append_event(self.events, event(2, EventType.APPROVAL_REQUESTED))
+
+        snapshot = ActivityStore(self.events, self.state).poll()
+
+        self.assertEqual(snapshot.applied_event_count, 2)
+        self.assertEqual(snapshot.rejected_event_count, 0)
+        self.assertEqual(snapshot.tasks["thread-a"].status, ActivityStatus.WAITING_APPROVAL)
+
+    def test_duplicate_event_id_is_applied_once(self) -> None:
+        duplicate = event(1, EventType.TURN_STARTED)
+        append_event(self.events, duplicate)
+        append_event(self.events, duplicate)
+
+        snapshot = ActivityStore(self.events, self.state).poll()
+
+        self.assertEqual(snapshot.applied_event_count, 1)
+        self.assertEqual(len(snapshot.tasks), 1)
+
+    def test_poll_keeps_offset_before_incomplete_tail(self) -> None:
+        first_line = json.dumps(payload(1, "turn_started"), separators=(",", ":")).encode("utf-8") + b"\n"
+        second_line = json.dumps(payload(2, "turn_completed"), separators=(",", ":")).encode("utf-8") + b"\n"
+        split_at = len(second_line) // 2
+        self.events.write_bytes(first_line + second_line[:split_at])
+        store = ActivityStore(self.events, self.state)
+
+        first = store.poll()
+        self.assertEqual(first.applied_event_count, 1)
+        self.assertEqual(first.tasks["thread-a"].status, ActivityStatus.WORKING)
+
+        with self.events.open("ab") as handle:
+            handle.write(second_line[split_at:])
+        second = store.poll()
+
+        self.assertEqual(second.applied_event_count, 1)
+        self.assertEqual(second.tasks["thread-a"].status, ActivityStatus.COMPLETED)
+
+    def test_bad_line_is_rejected_without_stopping_later_events(self) -> None:
+        valid_one = json.dumps(payload(1, "turn_started"), separators=(",", ":"))
+        valid_two = json.dumps(payload(2, "turn_completed"), separators=(",", ":"))
+        self.events.write_text(f"{valid_one}\nnot-json\n{valid_two}\n", encoding="utf-8")
+
+        snapshot = ActivityStore(self.events, self.state).poll()
+
+        self.assertEqual(snapshot.applied_event_count, 2)
+        self.assertEqual(snapshot.rejected_event_count, 1)
+        self.assertEqual(snapshot.tasks["thread-a"].status, ActivityStatus.COMPLETED)
+
+    def test_saved_projection_and_offset_restore_after_restart(self) -> None:
+        append_event(self.events, event(1, EventType.TURN_STARTED))
+        first_store = ActivityStore(self.events, self.state)
+        first_store.poll()
+        first_store.save()
+        append_event(self.events, event(2, EventType.TURN_COMPLETED))
+
+        restored = ActivityStore(self.events, self.state).poll()
+
+        self.assertEqual(restored.applied_event_count, 1)
+        self.assertEqual(restored.tasks["thread-a"].status, ActivityStatus.COMPLETED)
+
+
+if __name__ == "__main__":
+    unittest.main()
