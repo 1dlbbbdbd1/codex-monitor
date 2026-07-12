@@ -5,6 +5,7 @@ __pycache__/
 *.py[cod]
 .venv/
 .packaging-venv/
+.tools/
 windows/build/
 windows/dist/
 windows/*.spec
