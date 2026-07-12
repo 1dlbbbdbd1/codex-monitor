@@ -1,0 +1,61 @@
+{
+  "description": "Codex Floating Companion hook template. The Windows installer writes absolute executable paths into the active global hooks file.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CodexFloatingCompanion.exe --emit-hook",
+            "commandWindows": "CodexFloatingCompanion.exe --emit-hook",
+            "timeout": 5,
+            "async": true,
+            "statusMessage": "Codex Floating Companion · UserPromptSubmit"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CodexFloatingCompanion.exe --emit-hook",
+            "commandWindows": "CodexFloatingCompanion.exe --emit-hook",
+            "timeout": 5,
+            "async": true,
+            "statusMessage": "Codex Floating Companion · PermissionRequest"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CodexFloatingCompanion.exe --emit-hook",
+            "commandWindows": "CodexFloatingCompanion.exe --emit-hook",
+            "timeout": 5,
+            "async": true,
+            "statusMessage": "Codex Floating Companion · PostToolUse"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CodexFloatingCompanion.exe --emit-hook",
+            "commandWindows": "CodexFloatingCompanion.exe --emit-hook",
+            "timeout": 5,
+            "async": true,
+            "statusMessage": "Codex Floating Companion · Stop"
+          }
+        ]
+      }
+    ]
+  }
+}

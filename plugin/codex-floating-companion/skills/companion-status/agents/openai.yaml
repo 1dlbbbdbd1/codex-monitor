@@ -1,0 +1,4 @@
+interface:
+  display_name: "Companion Status"
+  short_description: "Check and repair companion status integration"
+  default_prompt: "Use $companion-status to diagnose the Codex Floating Companion connection."

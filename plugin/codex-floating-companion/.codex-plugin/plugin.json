@@ -1,0 +1,18 @@
+{
+  "name": "codex-floating-companion",
+  "version": "0.1.0",
+  "description": "Connects Codex lifecycle events to the local Windows floating quota and activity companion.",
+  "author": {
+    "name": "H-Diam"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Codex Floating Companion",
+    "shortDescription": "Diagnose and repair the Windows companion connection.",
+    "longDescription": "Adds a focused status and repair workflow for the local Codex Floating Companion. Runtime events are installed safely as global hooks until plugin-local hook loading is reliable.",
+    "developerName": "H-Diam",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": "Use $companion-status to check the Codex Floating Companion connection."
+  }
+}

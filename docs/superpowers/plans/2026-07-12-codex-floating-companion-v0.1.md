@@ -378,7 +378,7 @@ app.run()
 
 - [ ] **Step 4: Implement backup + atomic merge + targeted uninstall**
 
-Companion entries must include `"description": "codex-floating-companion:<event>"`. Reject malformed existing JSON, write `<hooks>.backup-YYYYMMDD-HHMMSS.json`, then replace atomically.
+Companion command handlers must include `"statusMessage": "Codex Floating Companion · <event>"`, which is a supported field in the current Codex `HookHandlerConfig` schema and serves as the stable ownership marker. Reject malformed existing JSON, write `<hooks>.backup-YYYYMMDD-HHMMSS.json`, then replace atomically.
 
 - [ ] **Step 5: Run plugin validation, targeted tests, and full tests**
 
