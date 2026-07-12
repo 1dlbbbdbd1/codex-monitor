@@ -16,6 +16,8 @@
 
 设计规格：[`docs/superpowers/specs/2026-07-12-codex-floating-companion-design.md`](docs/superpowers/specs/2026-07-12-codex-floating-companion-design.md)
 
+实施计划：[`docs/superpowers/plans/2026-07-12-codex-floating-companion-v0.1.md`](docs/superpowers/plans/2026-07-12-codex-floating-companion-v0.1.md)
+
 按照项目约定，先核查接口、已有资料和社区项目。设计未经用户确认前不创建实现代码。
 
 ## 已有资料与环境
