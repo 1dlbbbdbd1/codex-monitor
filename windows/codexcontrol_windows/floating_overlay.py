@@ -12,6 +12,7 @@ from .brand_icon import build_orbit_dial_icon
 from .notification_state import BadgeState
 from .overlay_geometry import DockEdge, Monitor, Point, Rect, Size, dock_target, hidden_target, recover_to_monitors
 from .settings_store import OverlaySettings, OverlaySettingsStore
+from .ui_theme import CODEX_DARK_PALETTE
 
 
 BALL_SIZE = 56
@@ -52,6 +53,7 @@ class OverlayViewModel:
     quota_rows: tuple[QuotaRow, ...]
     task_rows: tuple[TaskRow, ...]
     health_text: str
+    activity_stale: bool
 
 
 _STATUS_TEXT = {
@@ -64,12 +66,12 @@ _STATUS_TEXT = {
 }
 
 _STATUS_COLOR = {
-    ActivityStatus.UNKNOWN: "#94a3b8",
-    ActivityStatus.IDLE: "#94a3b8",
-    ActivityStatus.WORKING: "#3ad06d",
-    ActivityStatus.WAITING_APPROVAL: "#f59e0b",
-    ActivityStatus.COMPLETED: "#38bdf8",
-    ActivityStatus.FAILED: "#ef4444",
+    ActivityStatus.UNKNOWN: CODEX_DARK_PALETTE["neutral"],
+    ActivityStatus.IDLE: CODEX_DARK_PALETTE["neutral"],
+    ActivityStatus.WORKING: CODEX_DARK_PALETTE["success"],
+    ActivityStatus.WAITING_APPROVAL: CODEX_DARK_PALETTE["warning"],
+    ActivityStatus.COMPLETED: CODEX_DARK_PALETTE["info"],
+    ActivityStatus.FAILED: CODEX_DARK_PALETTE["danger"],
 }
 
 
@@ -80,8 +82,9 @@ def build_overlay_view_model(
     quota_rows: Sequence[QuotaRow],
     tasks: Iterable[TaskProjection],
     health_text: str,
+    activity_stale: bool = False,
 ) -> OverlayViewModel:
-    task_rows = tuple(
+    task_rows = () if activity_stale else tuple(
         TaskRow(
             thread_id=task.thread_id,
             title=task.task_title or task.project_name or "Codex 任务",
@@ -99,11 +102,12 @@ def build_overlay_view_model(
         accent_color=_STATUS_COLOR[aggregate.status],
         count_text=str(count) if count else "",
         badge_visible=badge.visible,
-        badge_color="#ef4444" if urgent_badge else "#38bdf8",
+        badge_color=CODEX_DARK_PALETTE["danger"] if urgent_badge else CODEX_DARK_PALETTE["info"],
         keep_handle_visible=badge.visible,
         quota_rows=tuple(quota_rows),
         task_rows=task_rows,
         health_text=health_text,
+        activity_stale=activity_stale,
     )
 
 
@@ -119,6 +123,7 @@ class FloatingOverlay:
         on_task_open: Callable[[str], None] | None = None,
         on_panel_viewed: Callable[[], None] | None = None,
         on_hide_requested: Callable[[], None] | None = None,
+        on_repair_requested: Callable[[], None] | None = None,
     ) -> None:
         self.parent = parent
         self.settings_store = settings_store or OverlaySettingsStore()
@@ -127,18 +132,20 @@ class FloatingOverlay:
         self.on_task_open = on_task_open or (lambda _thread_id: None)
         self.on_panel_viewed = on_panel_viewed or (lambda: None)
         self.on_hide_requested = on_hide_requested or self.hide
+        self.on_repair_requested = on_repair_requested or (lambda: None)
         self.model = build_overlay_view_model(
             aggregate=AggregateStatus(ActivityStatus.IDLE, 0, 0),
             badge=BadgeState(),
             quota_rows=(),
             tasks=(),
             health_text="等待 Codex 事件",
+            activity_stale=False,
         )
 
         self.window = tk.Toplevel(parent)
         self.window.withdraw()
         self.window.overrideredirect(True)
-        self.window.attributes("-topmost", True)
+        self.window.attributes("-topmost", self.settings.always_on_top)
         self.window.configure(bg=TRANSPARENT_KEY)
         try:
             self.window.wm_attributes("-transparentcolor", TRANSPARENT_KEY)
@@ -169,10 +176,25 @@ class FloatingOverlay:
         self._render_ball()
 
     def show(self) -> None:
+        self.window.attributes("-topmost", self.settings.always_on_top)
         self.window.geometry(f"{BALL_SIZE}x{BALL_SIZE}+{self._placement.position.x}+{self._placement.position.y}")
         self.window.deiconify()
         self.window.lift()
         self._schedule_hide()
+
+    def set_always_on_top(self, always_on_top: bool) -> None:
+        self.settings = OverlaySettings(
+            placement=self.settings.placement,
+            overlay_enabled=self.settings.overlay_enabled,
+            auto_hide=self.settings.auto_hide,
+            always_on_top=always_on_top,
+        )
+        try:
+            self.window.attributes("-topmost", always_on_top)
+            if self._panel is not None and self._panel.winfo_exists():
+                self._panel.attributes("-topmost", always_on_top)
+        except tk.TclError:
+            pass
 
     def hide(self) -> None:
         self._cancel_hide()
@@ -208,8 +230,8 @@ class FloatingOverlay:
         self._reveal()
         self._panel = tk.Toplevel(self.parent)
         self._panel.overrideredirect(True)
-        self._panel.attributes("-topmost", True)
-        self._panel.configure(bg="#111820")
+        self._panel.attributes("-topmost", self.settings.always_on_top)
+        self._panel.configure(bg=CODEX_DARK_PALETTE["shell"])
         self._panel.bind("<Escape>", lambda _event: self._close_panel())
         self._position_panel()
         self._render_panel()
@@ -241,50 +263,63 @@ class FloatingOverlay:
         assert self._panel is not None
         for child in self._panel.winfo_children():
             child.destroy()
-        panel = tk.Frame(self._panel, bg="#111820", padx=18, pady=16)
+        panel = tk.Frame(self._panel, bg=CODEX_DARK_PALETTE["shell"], padx=18, pady=16)
         panel.pack(fill="both", expand=True)
 
-        header = tk.Frame(panel, bg="#111820")
+        header = tk.Frame(panel, bg=CODEX_DARK_PALETTE["shell"])
         header.pack(fill="x")
         tk.Label(
             header,
             text=self.model.status_text,
             fg=self.model.accent_color,
-            bg="#111820",
-            font=("Microsoft YaHei UI", 14, "bold"),
+            bg=CODEX_DARK_PALETTE["shell"],
+            font=("Microsoft YaHei UI", 15, "bold"),
         ).pack(side="left")
         tk.Button(
             header,
             text="刷新",
             command=self.on_refresh,
-            fg="#dbeafe",
-            bg="#1e293b",
-            activebackground="#334155",
+            fg=CODEX_DARK_PALETTE["text"],
+            bg=CODEX_DARK_PALETTE["panel_alt"],
+            activebackground=CODEX_DARK_PALETTE["accent_soft"],
             activeforeground="#ffffff",
             relief="flat",
             padx=10,
         ).pack(side="right")
-        tk.Label(panel, text=self.model.health_text, fg="#94a3b8", bg="#111820", anchor="w").pack(fill="x", pady=(2, 14))
+        tk.Label(panel, text=self.model.health_text, fg=CODEX_DARK_PALETTE["muted"], bg=CODEX_DARK_PALETTE["shell"], anchor="w", font=("Microsoft YaHei UI", 10)).pack(fill="x", pady=(2, 14))
+        if self.model.activity_stale:
+            tk.Button(
+                panel,
+                text="修复状态连接",
+                command=self.on_repair_requested,
+                fg="#ffffff",
+                bg=CODEX_DARK_PALETTE["accent_line"],
+                activebackground=CODEX_DARK_PALETTE["accent"],
+                activeforeground="#ffffff",
+                relief="flat",
+                padx=10,
+                pady=4,
+            ).pack(fill="x", pady=(0, 12))
 
         self._section_title(panel, "额度与刷新时间")
         if self.model.quota_rows:
             for quota in self.model.quota_rows:
-                row = tk.Frame(panel, bg="#17212b", padx=10, pady=7)
+                row = tk.Frame(panel, bg=CODEX_DARK_PALETTE["panel"], padx=10, pady=7)
                 row.pack(fill="x", pady=2)
-                tk.Label(row, text=quota.label, fg="#cbd5e1", bg="#17212b").pack(side="left")
-                tk.Label(row, text=quota.reset_text, fg="#64748b", bg="#17212b").pack(side="right", padx=(8, 0))
-                tk.Label(row, text=quota.remaining_text, fg=self._quota_color(quota.remaining_percent), bg="#17212b", font=("Segoe UI", 10, "bold")).pack(side="right")
+                tk.Label(row, text=quota.label, fg=CODEX_DARK_PALETTE["text"], bg=CODEX_DARK_PALETTE["panel"], font=("Microsoft YaHei UI", 10)).pack(side="left")
+                tk.Label(row, text=quota.reset_text, fg=CODEX_DARK_PALETTE["subtle"], bg=CODEX_DARK_PALETTE["panel"], font=("Microsoft YaHei UI", 9)).pack(side="right", padx=(8, 0))
+                tk.Label(row, text=quota.remaining_text, fg=self._quota_color(quota.remaining_percent), bg=CODEX_DARK_PALETTE["panel"], font=("Segoe UI", 10, "bold")).pack(side="right")
         else:
             self._empty_row(panel, "尚无额度数据")
 
         self._section_title(panel, "最近任务", top=14)
         if self.model.task_rows:
             for task in self.model.task_rows:
-                row = tk.Frame(panel, bg="#17212b", padx=10, pady=7, cursor="hand2")
+                row = tk.Frame(panel, bg=CODEX_DARK_PALETTE["panel"], padx=10, pady=7, cursor="hand2")
                 row.pack(fill="x", pady=2)
-                title = tk.Label(row, text=task.title, fg="#e2e8f0", bg="#17212b", anchor="w")
+                title = tk.Label(row, text=task.title, fg=CODEX_DARK_PALETTE["text"], bg=CODEX_DARK_PALETTE["panel"], anchor="w", font=("Microsoft YaHei UI", 10, "bold"))
                 title.pack(fill="x")
-                detail = tk.Label(row, text=f"{task.status_text} · {task.project}", fg=_STATUS_COLOR[task.status], bg="#17212b", anchor="w", font=("Segoe UI", 8))
+                detail = tk.Label(row, text=f"{task.status_text} · {task.project}", fg=_STATUS_COLOR[task.status], bg=CODEX_DARK_PALETTE["panel"], anchor="w", font=("Microsoft YaHei UI", 9))
                 detail.pack(fill="x")
                 for widget in (row, title, detail):
                     widget.bind("<Button-1>", lambda _event, thread_id=task.thread_id: self.on_task_open(thread_id))
@@ -294,26 +329,26 @@ class FloatingOverlay:
         tk.Label(
             panel,
             text="单击悬浮球收起 · 右键隐藏",
-            fg="#526170",
-            bg="#111820",
-            font=("Segoe UI", 8),
+            fg=CODEX_DARK_PALETTE["subtle"],
+            bg=CODEX_DARK_PALETTE["shell"],
+            font=("Microsoft YaHei UI", 9),
         ).pack(side="bottom", pady=(12, 0))
 
     @staticmethod
     def _section_title(parent: tk.Misc, text: str, *, top: int = 0) -> None:
-        tk.Label(parent, text=text, fg="#94a3b8", bg="#111820", anchor="w", font=("Microsoft YaHei UI", 9, "bold")).pack(fill="x", pady=(top, 5))
+        tk.Label(parent, text=text, fg=CODEX_DARK_PALETTE["muted"], bg=CODEX_DARK_PALETTE["shell"], anchor="w", font=("Microsoft YaHei UI", 10, "bold")).pack(fill="x", pady=(top, 5))
 
     @staticmethod
     def _empty_row(parent: tk.Misc, text: str) -> None:
-        tk.Label(parent, text=text, fg="#64748b", bg="#17212b", padx=10, pady=9, anchor="w").pack(fill="x")
+        tk.Label(parent, text=text, fg=CODEX_DARK_PALETTE["muted"], bg=CODEX_DARK_PALETTE["panel"], padx=10, pady=9, anchor="w", font=("Microsoft YaHei UI", 10)).pack(fill="x")
 
     @staticmethod
     def _quota_color(remaining: float) -> str:
         if remaining <= 10:
-            return "#ef4444"
+            return CODEX_DARK_PALETTE["danger"]
         if remaining <= 20:
-            return "#f59e0b"
-        return "#3ad06d"
+            return CODEX_DARK_PALETTE["warning"]
+        return CODEX_DARK_PALETTE["success"]
 
     def _press(self, event: tk.Event) -> None:
         self._cancel_hide()
@@ -422,6 +457,7 @@ class FloatingOverlay:
             placement=self._placement,
             overlay_enabled=self.settings.overlay_enabled,
             auto_hide=self.settings.auto_hide,
+            always_on_top=self.settings.always_on_top,
         )
         try:
             self.settings_store.save(self.settings)

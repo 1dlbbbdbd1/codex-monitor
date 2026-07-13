@@ -8,6 +8,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 from dataclasses import dataclass
 from concurrent.futures import Future, ThreadPoolExecutor
+from datetime import datetime, timezone
 from pathlib import Path
 from tkinter import messagebox, ttk
 from typing import Any, Callable
@@ -29,8 +30,9 @@ from .hook_installer import HookInstaller
 from .models import AccountRuntimeState, AccountUsageSnapshot, RemovedAccountIdentity, StoredAccount, StoredAccountSource, utc_now
 from .notification_state import NotificationState
 from .presentation_logic import account_sort_key, is_active_account
-from .settings_store import overlay_settings_with_visibility
+from .settings_store import overlay_settings_with_topmost, overlay_settings_with_visibility
 from .stores import AccountStore, SnapshotStore
+from .ui_theme import CODEX_DARK_PALETTE
 
 
 @dataclass(slots=True)
@@ -84,6 +86,25 @@ def activity_poll_render_decision(
         return next_health, next_health != current_health
 
     return current_health, False
+
+
+def activity_connection_health(
+    events_path: Path,
+    *,
+    now: datetime,
+    stale_after_seconds: int = 15 * 60,
+) -> str:
+    if not events_path.exists():
+        return "状态连接未收到事件"
+    try:
+        modified_at = datetime.fromtimestamp(events_path.stat().st_mtime, tz=timezone.utc)
+    except OSError:
+        return "状态连接异常"
+
+    age_seconds = (now.astimezone(timezone.utc) - modified_at).total_seconds()
+    if age_seconds > stale_after_seconds:
+        return "状态连接陈旧，请修复"
+    return "Codex 状态连接正常"
 
 
 class RoundedButton(tk.Canvas):
@@ -389,6 +410,7 @@ class CodexControlWindowsApp:
         self._activity_poll_inflight = False
         self._activity_snapshot = ActivitySnapshot(tasks=dict(self.activity_store.tasks), applied_event_count=0, rejected_event_count=0)
         self._activity_health = "等待 Codex 事件"
+        self._activity_stale = True
         self._cards_render_token = 0
         self._last_render_width = 0
         self._accounts_revision = 0
@@ -401,25 +423,7 @@ class CodexControlWindowsApp:
         self._metric_value_labels: dict[str, tk.Label] = {}
         self.start_hidden = start_hidden
 
-        self.palette = {
-            "bg": "#0a0f14",
-            "shell": "#0f151c",
-            "panel": "#151c24",
-            "panel_alt": "#1b2430",
-            "selected": "#122129",
-            "text": "#edf2f7",
-            "muted": "#93a0ae",
-            "hairline": "#27313c",
-            "accent": "#4fd1c5",
-            "accent_soft": "#13373a",
-            "accent_line": "#235155",
-            "success": "#38d39f",
-            "warning": "#f0b35b",
-            "danger": "#ef7d72",
-            "neutral": "#8090a1",
-            "dark_icon": "#0c1218",
-            "track": "#26323f",
-        }
+        self.palette = dict(CODEX_DARK_PALETTE)
 
         self.root = tk.Tk()
         self.root.title("CodexControl")
@@ -451,6 +455,7 @@ class CodexControlWindowsApp:
             on_task_open=self._open_companion_task,
             on_panel_viewed=self._acknowledge_companion_panel,
             on_hide_requested=lambda: self._set_floating_overlay_visible(False),
+            on_repair_requested=self._repair_companion_integration,
         )
         self._overlay_visible = self.floating_overlay.settings.overlay_enabled
         self._render_now()
@@ -922,6 +927,10 @@ class CodexControlWindowsApp:
                 lambda _: "隐藏悬浮助手" if getattr(self, "_overlay_visible", True) else "显示悬浮助手",
                 lambda icon, item: self.root.after(0, self._toggle_floating_overlay),
             ),
+            pystray.MenuItem(
+                lambda _: self._floating_overlay_topmost_menu_label(),
+                lambda icon, item: self.root.after(0, self._toggle_floating_overlay_topmost),
+            ),
             pystray.MenuItem("全部刷新", lambda icon, item: self.root.after(0, self.refresh_all)),
             pystray.MenuItem("修复 Codex 状态连接", lambda icon, item: self.root.after(0, self._repair_companion_integration)),
             pystray.MenuItem("添加账号", lambda icon, item: self.root.after(0, self.start_add_account)),
@@ -934,6 +943,12 @@ class CodexControlWindowsApp:
             menu,
         )
         self.tray_icon.run_detached()
+
+    def _floating_overlay_topmost_menu_label(self) -> str:
+        overlay = getattr(self, "floating_overlay", None)
+        settings = getattr(overlay, "settings", None)
+        always_on_top = True if settings is None else settings.always_on_top
+        return "取消置顶悬浮球" if always_on_top else "置顶悬浮球"
 
     def _set_window_icon(self) -> None:
         self.window_icon_images = [
@@ -1209,6 +1224,11 @@ class CodexControlWindowsApp:
             events_file_exists=self.activity_store.events_path.exists(),
         )
         if snapshot is not None:
+            if snapshot.rejected_event_count == 0:
+                next_health = activity_connection_health(self.activity_store.events_path, now=utc_now())
+                should_render = should_render or next_health != self._activity_health
+            next_stale = self._activity_health_is_stale(next_health)
+            should_render = should_render or next_stale != self._activity_stale
             self._activity_snapshot = snapshot
             for activity_event in snapshot.applied_events:
                 self.notification_state.observe_activity(activity_event)
@@ -1218,10 +1238,14 @@ class CodexControlWindowsApp:
                 except OSError:
                     pass
             self._activity_health = next_health
+            self._activity_stale = next_stale
             if should_render:
                 self._render()
         elif error is not None:
+            next_stale = self._activity_health_is_stale(next_health)
+            should_render = should_render or next_stale != self._activity_stale
             self._activity_health = next_health
+            self._activity_stale = next_stale
             if should_render:
                 self._render()
         if not self._quitting:
@@ -1229,14 +1253,24 @@ class CodexControlWindowsApp:
 
     def _update_floating_overlay(self) -> None:
         tasks = tuple(self._activity_snapshot.tasks.values())
+        visible_tasks = () if self._activity_stale else tasks
         model = build_overlay_view_model(
-            aggregate=aggregate_tasks(tasks),
+            aggregate=aggregate_tasks(visible_tasks),
             badge=self.notification_state.badge,
             quota_rows=self._companion_quota_rows(),
-            tasks=tasks,
+            tasks=visible_tasks,
             health_text=self._activity_health,
+            activity_stale=self._activity_stale,
         )
         self.floating_overlay.update(model)
+
+    @staticmethod
+    def _activity_health_is_stale(health_text: str) -> bool:
+        return health_text in {
+            "状态连接未收到事件",
+            "状态连接陈旧，请修复",
+            "状态连接异常",
+        }
 
     def _companion_quota_rows(self) -> tuple[QuotaRow, ...]:
         candidates = [
@@ -1287,6 +1321,23 @@ class CodexControlWindowsApp:
         )
         try:
             self.floating_overlay.settings_store.save(self.floating_overlay.settings)
+        except OSError:
+            pass
+        if self.tray_icon is not None:
+            try:
+                self.tray_icon.update_menu()
+            except Exception:
+                pass
+
+    def _toggle_floating_overlay_topmost(self) -> None:
+        settings = overlay_settings_with_topmost(
+            self.floating_overlay.settings,
+            not self.floating_overlay.settings.always_on_top,
+        )
+        self.floating_overlay.settings = settings
+        self.floating_overlay.set_always_on_top(settings.always_on_top)
+        try:
+            self.floating_overlay.settings_store.save(settings)
         except OSError:
             pass
         if self.tray_icon is not None:

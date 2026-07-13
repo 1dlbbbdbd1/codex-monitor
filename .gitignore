@@ -9,3 +9,6 @@ __pycache__/
 windows/build/
 windows/dist/
 windows/*.spec
+test-artifacts/
+test-tmp/
+.tmp-tests/

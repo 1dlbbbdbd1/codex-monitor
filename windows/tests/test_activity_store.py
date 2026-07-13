@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -9,7 +10,7 @@ from uuid import UUID
 
 from codexcontrol_windows.activity_models import ActivityEvent, ActivityStatus, EventType
 from codexcontrol_windows.activity_store import ActivityStore, append_event
-from codexcontrol_windows.app import activity_poll_render_decision
+from codexcontrol_windows.app import activity_connection_health, activity_poll_render_decision
 
 
 NOW = datetime(2026, 7, 12, 12, 0, tzinfo=timezone.utc)
@@ -157,6 +158,48 @@ class ActivityPollRenderDecisionTests(unittest.TestCase):
 
         self.assertEqual(health, "Codex 状态连接正常")
         self.assertTrue(should_render)
+
+
+class ActivityConnectionHealthTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.root = Path("test-artifacts") / "activity-connection-health"
+        self.root.mkdir(parents=True, exist_ok=True)
+        self.events = self.root / "activity-events.jsonl"
+        self.state = self.root / "activity-state.json"
+        self.events.unlink(missing_ok=True)
+        self.state.unlink(missing_ok=True)
+        self.now = datetime(2026, 7, 13, 9, 30, tzinfo=timezone.utc)
+
+    def tearDown(self) -> None:
+        self.events.unlink(missing_ok=True)
+        self.state.unlink(missing_ok=True)
+        try:
+            self.root.rmdir()
+            self.root.parent.rmdir()
+        except OSError:
+            pass
+
+    def test_missing_events_file_reports_not_connected(self) -> None:
+        health = activity_connection_health(self.events, now=self.now)
+
+        self.assertEqual(health, "状态连接未收到事件")
+
+    def test_recent_events_file_reports_connected(self) -> None:
+        self.events.write_text("", encoding="utf-8")
+        os.utime(self.events, (self.now.timestamp(), self.now.timestamp()))
+
+        health = activity_connection_health(self.events, now=self.now)
+
+        self.assertEqual(health, "Codex 状态连接正常")
+
+    def test_stale_events_file_reports_repair_needed(self) -> None:
+        stale_time = self.now - timedelta(minutes=30)
+        self.events.write_text("", encoding="utf-8")
+        os.utime(self.events, (stale_time.timestamp(), stale_time.timestamp()))
+
+        health = activity_connection_health(self.events, now=self.now)
+
+        self.assertEqual(health, "状态连接陈旧，请修复")
 
     def test_first_successful_connection_status_requests_render(self) -> None:
         snapshot = ActivityStore(self.events, self.state).poll()

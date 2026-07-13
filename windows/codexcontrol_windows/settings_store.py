@@ -15,6 +15,7 @@ class OverlaySettings:
     placement: OverlayPlacement | None = None
     overlay_enabled: bool = True
     auto_hide: bool = True
+    always_on_top: bool = True
 
 
 def overlay_settings_with_visibility(settings: OverlaySettings, visible: bool) -> OverlaySettings:
@@ -22,6 +23,16 @@ def overlay_settings_with_visibility(settings: OverlaySettings, visible: bool) -
         placement=settings.placement,
         overlay_enabled=visible,
         auto_hide=settings.auto_hide,
+        always_on_top=settings.always_on_top,
+    )
+
+
+def overlay_settings_with_topmost(settings: OverlaySettings, always_on_top: bool) -> OverlaySettings:
+    return OverlaySettings(
+        placement=settings.placement,
+        overlay_enabled=settings.overlay_enabled,
+        auto_hide=settings.auto_hide,
+        always_on_top=always_on_top,
     )
 
 
@@ -42,6 +53,7 @@ class OverlaySettingsStore:
                 placement=placement,
                 overlay_enabled=bool(payload.get("overlayEnabled", True)),
                 auto_hide=bool(payload.get("autoHide", True)),
+                always_on_top=bool(payload.get("alwaysOnTop", True)),
             )
         except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
             return OverlaySettings()
@@ -53,6 +65,7 @@ class OverlaySettingsStore:
             "placement": self._placement_to_dict(settings.placement) if settings.placement else None,
             "overlayEnabled": settings.overlay_enabled,
             "autoHide": settings.auto_hide,
+            "alwaysOnTop": settings.always_on_top,
         }
         temporary = self.path.with_suffix(f"{self.path.suffix}.tmp")
         temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")

@@ -15,7 +15,22 @@ def build_orbit_dial_icon(
     dark: str = "#121820",
     border: str = "#29323c",
     glow: str = "#0d1611",
+    scale_factor: int = 4,
 ) -> Image.Image:
+    if scale_factor > 1:
+        large = build_orbit_dial_icon(
+            size * scale_factor,
+            accent=accent,
+            core=core,
+            panel_fill=panel_fill,
+            panel_fill_end=panel_fill_end,
+            dark=dark,
+            border=border,
+            glow=glow,
+            scale_factor=1,
+        )
+        return large.resize((size, size), Image.Resampling.LANCZOS)
+
     image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
 
     gradient = Image.new("RGBA", (size, size), (0, 0, 0, 0))

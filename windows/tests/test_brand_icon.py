@@ -26,6 +26,16 @@ class BrandIconTests(unittest.TestCase):
 
         self.assertEqual(image.getpixel((0, 0))[3], 0)
 
+    def test_icon_uses_antialiasing_on_outer_edge(self) -> None:
+        image = build_orbit_dial_icon(56, accent="#31d18b", scale_factor=4)
+
+        self.assertEqual(image.size, (56, 56))
+        self.assertEqual(image.mode, "RGBA")
+        alpha_values = {alpha for *_, alpha in image.getdata()}
+        soft_alpha_values = {alpha for alpha in alpha_values if 0 < alpha < 255}
+
+        self.assertGreater(len(soft_alpha_values), 8)
+
 
 if __name__ == "__main__":
     unittest.main()
