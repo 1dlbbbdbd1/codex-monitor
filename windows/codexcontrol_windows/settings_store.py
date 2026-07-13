@@ -17,6 +17,14 @@ class OverlaySettings:
     auto_hide: bool = True
 
 
+def overlay_settings_with_visibility(settings: OverlaySettings, visible: bool) -> OverlaySettings:
+    return OverlaySettings(
+        placement=settings.placement,
+        overlay_enabled=visible,
+        auto_hide=settings.auto_hide,
+    )
+
+
 class OverlaySettingsStore:
     def __init__(self, path: Path = COMPANION_SETTINGS_FILE) -> None:
         self.path = path

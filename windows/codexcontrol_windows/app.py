@@ -29,6 +29,7 @@ from .hook_installer import HookInstaller
 from .models import AccountRuntimeState, AccountUsageSnapshot, RemovedAccountIdentity, StoredAccount, StoredAccountSource, utc_now
 from .notification_state import NotificationState
 from .presentation_logic import account_sort_key, is_active_account
+from .settings_store import overlay_settings_with_visibility
 from .stores import AccountStore, SnapshotStore
 
 
@@ -60,6 +61,29 @@ class PresentationState:
         if self.exhausted_count == self.account_count:
             return "unavailable"
         return "unresolved"
+
+
+def activity_poll_render_decision(
+    *,
+    current_health: str,
+    snapshot: ActivitySnapshot | None,
+    error: Exception | None,
+    events_file_exists: bool,
+) -> tuple[str, bool]:
+    if snapshot is not None:
+        next_health = current_health
+        if snapshot.rejected_event_count:
+            next_health = f"已连接 · 忽略 {snapshot.rejected_event_count} 条异常事件"
+        elif events_file_exists:
+            next_health = "Codex 状态连接正常"
+        should_render = snapshot.applied_event_count > 0 or next_health != current_health
+        return next_health, should_render
+
+    if error is not None:
+        next_health = "Codex 状态连接异常"
+        return next_health, next_health != current_health
+
+    return current_health, False
 
 
 class RoundedButton(tk.Canvas):
@@ -426,6 +450,7 @@ class CodexControlWindowsApp:
             on_refresh=self.refresh_all,
             on_task_open=self._open_companion_task,
             on_panel_viewed=self._acknowledge_companion_panel,
+            on_hide_requested=lambda: self._set_floating_overlay_visible(False),
         )
         self._overlay_visible = self.floating_overlay.settings.overlay_enabled
         self._render_now()
@@ -540,7 +565,7 @@ class CodexControlWindowsApp:
             return
 
         self.is_adding_account = True
-        self.status_message = "Complete or cancel the Codex sign-in flow in your browser."
+        self.status_message = "请在浏览器中完成或取消 Codex 登录。"
         self._add_handle = ManagedLoginProcess()
         self._submit_future(
             self.executor.submit(self.account_manager.add_managed_account, self._add_handle),
@@ -552,7 +577,7 @@ class CodexControlWindowsApp:
         if not self.is_adding_account or self._add_handle is None:
             return
 
-        self.status_message = "Cancelling account setup."
+        self.status_message = "正在取消账号添加。"
         self._add_handle.cancel()
         self._render()
 
@@ -561,7 +586,7 @@ class CodexControlWindowsApp:
             return
 
         self.reauthenticating_account_id = account.id
-        self.status_message = f"Waiting for {account.display_name} to sign in again."
+        self.status_message = f"等待 {account.display_name} 重新登录。"
         self._reauth_handle = ManagedLoginProcess()
         self._submit_future(
             self.executor.submit(self.account_manager.reauthenticate, account, self._reauth_handle),
@@ -585,8 +610,8 @@ class CodexControlWindowsApp:
 
     def remove_account(self, account: StoredAccount) -> None:
         confirmed = messagebox.askyesno(
-            "Remove Account",
-            f"{account.display_name} will be removed from CodexControl.",
+            "移除账号",
+            f"将从 CodexControl 移除 {account.display_name}。",
             parent=self.root,
         )
         if not confirmed:
@@ -609,14 +634,14 @@ class CodexControlWindowsApp:
             self.account_manager.remove_managed_files_if_owned(account)
             self.account_store.save_accounts(self.accounts, self.removed_accounts)
             self._ensure_selection()
-            self.status_message = f"{account.display_name} removed."
+            self.status_message = f"已移除 {account.display_name}。"
         except CodexAccountManagerError as error:
             self.status_message = str(error)
         self._render()
 
     def switch_account(self, account: StoredAccount) -> None:
         if self._is_active_account(account):
-            self.status_message = f"{account.display_name} is already the active Codex account."
+            self.status_message = f"{account.display_name} 已经是当前 Codex 账号。"
             self._render()
             return
 
@@ -627,8 +652,8 @@ class CodexControlWindowsApp:
             self._refresh_active_identity()
             self._load_initial_state()
             self.status_message = (
-                f"Active account switched to {account.display_name}. "
-                "Restarting Codex Desktop to apply the new session."
+                f"已切换到 {account.display_name}。"
+                "正在重启 Codex Desktop 以应用新会话。"
             )
             self._render()
             if self._restart_desktop_job is not None:
@@ -799,7 +824,7 @@ class CodexControlWindowsApp:
 
         self.add_button = self._make_button(
             controls,
-            text="Add",
+            text="添加",
             command=self.start_or_cancel_add_account,
             kind="surface",
             icon=self.icons["add"],
@@ -808,7 +833,7 @@ class CodexControlWindowsApp:
 
         self.refresh_button = self._make_button(
             controls,
-            text="Refresh",
+            text="刷新",
             command=self.refresh_all,
             kind="surface",
             icon=self.icons["refresh"],
@@ -890,17 +915,17 @@ class CodexControlWindowsApp:
         self.tray_icon: pystray.Icon | None = None
         menu = pystray.Menu(
             pystray.MenuItem(
-                lambda _: "Hide Window" if self.root.state() != "withdrawn" else "Show Window",
+                lambda _: "隐藏主窗口" if self.root.state() != "withdrawn" else "显示主窗口",
                 lambda icon, item: self.root.after(0, self._toggle_window),
             ),
             pystray.MenuItem(
                 lambda _: "隐藏悬浮助手" if getattr(self, "_overlay_visible", True) else "显示悬浮助手",
                 lambda icon, item: self.root.after(0, self._toggle_floating_overlay),
             ),
-            pystray.MenuItem("Refresh All", lambda icon, item: self.root.after(0, self.refresh_all)),
+            pystray.MenuItem("全部刷新", lambda icon, item: self.root.after(0, self.refresh_all)),
             pystray.MenuItem("修复 Codex 状态连接", lambda icon, item: self.root.after(0, self._repair_companion_integration)),
-            pystray.MenuItem("Add Account", lambda icon, item: self.root.after(0, self.start_add_account)),
-            pystray.MenuItem("Quit", lambda icon, item: self.root.after(0, self.quit)),
+            pystray.MenuItem("添加账号", lambda icon, item: self.root.after(0, self.start_add_account)),
+            pystray.MenuItem("退出", lambda icon, item: self.root.after(0, self.quit)),
         )
         self.tray_icon = pystray.Icon(
             "CodexControl",
@@ -1017,7 +1042,7 @@ class CodexControlWindowsApp:
             self.notification_state.observe_quota(snapshot, observed_at=snapshot.updated_at)
         else:
             state.snapshot = None
-            state.error_message = str(error) if error else "Unknown refresh error."
+            state.error_message = str(error) if error else "未知刷新错误。"
             self.runtime_states[account_id] = state
 
         self._mark_runtime_dirty()
@@ -1046,10 +1071,10 @@ class CodexControlWindowsApp:
             matched = next((candidate for candidate in self.accounts if candidate.matches(account)), account)
             self.selected_account_id = matched.id
             self.nickname_drafts[matched.id] = matched.nickname or ""
-            self.status_message = f"{matched.display_name} added."
+            self.status_message = f"已添加 {matched.display_name}。"
             self.refresh_account(matched)
         else:
-            self.status_message = str(error) if error else "Account setup failed."
+            self.status_message = str(error) if error else "账号添加失败。"
             self._render()
 
     def _apply_reauth_result(
@@ -1066,7 +1091,7 @@ class CodexControlWindowsApp:
             self.accounts = self.account_store.merge(self.accounts, [account])
             self.account_store.save_accounts(self.accounts, self.removed_accounts)
             self._mark_accounts_dirty()
-            self.status_message = f"{account.display_name} reauthenticated."
+            self.status_message = f"{account.display_name} 已重新登录。"
             refreshed = next((candidate for candidate in self.accounts if candidate.id == original_account_id), None)
             if refreshed is not None:
                 self.refresh_account(refreshed)
@@ -1074,7 +1099,7 @@ class CodexControlWindowsApp:
                 self._render()
             return
 
-        self.status_message = str(error) if error else "Reauthentication failed."
+        self.status_message = str(error) if error else "重新登录失败。"
         self._render()
 
     def _update_account_metadata(self, account_id: UUID, snapshot: AccountUsageSnapshot) -> None:
@@ -1177,6 +1202,12 @@ class CodexControlWindowsApp:
         error: Exception | None,
     ) -> None:
         self._activity_poll_inflight = False
+        next_health, should_render = activity_poll_render_decision(
+            current_health=self._activity_health,
+            snapshot=snapshot,
+            error=error,
+            events_file_exists=self.activity_store.events_path.exists(),
+        )
         if snapshot is not None:
             self._activity_snapshot = snapshot
             for activity_event in snapshot.applied_events:
@@ -1186,14 +1217,13 @@ class CodexControlWindowsApp:
                     self.activity_store.save()
                 except OSError:
                     pass
-            if snapshot.rejected_event_count:
-                self._activity_health = f"已连接 · 忽略 {snapshot.rejected_event_count} 条异常事件"
-            elif self.activity_store.events_path.exists():
-                self._activity_health = "Codex 状态连接正常"
-            self._render()
+            self._activity_health = next_health
+            if should_render:
+                self._render()
         elif error is not None:
-            self._activity_health = "Codex 状态连接异常"
-            self._render()
+            self._activity_health = next_health
+            if should_render:
+                self._render()
         if not self._quitting:
             self._activity_poll_job = self.root.after(self.ACTIVITY_POLL_MS, self._activity_poll_tick)
 
@@ -1243,11 +1273,22 @@ class CodexControlWindowsApp:
             self._render()
 
     def _toggle_floating_overlay(self) -> None:
-        self._overlay_visible = not self._overlay_visible
+        self._set_floating_overlay_visible(not self._overlay_visible)
+
+    def _set_floating_overlay_visible(self, visible: bool) -> None:
+        self._overlay_visible = visible
         if self._overlay_visible:
             self.floating_overlay.show()
         else:
             self.floating_overlay.hide()
+        self.floating_overlay.settings = overlay_settings_with_visibility(
+            self.floating_overlay.settings,
+            self._overlay_visible,
+        )
+        try:
+            self.floating_overlay.settings_store.save(self.floating_overlay.settings)
+        except OSError:
+            pass
         if self.tray_icon is not None:
             try:
                 self.tray_icon.update_menu()
@@ -1324,7 +1365,7 @@ class CodexControlWindowsApp:
             text=self._header_status_text(presentation),
             wraplength=self._header_wrap_width(),
         )
-        self.add_button.set_text("Cancel" if self.is_adding_account else "Add")
+        self.add_button.set_text("取消" if self.is_adding_account else "添加")
         self.add_button.set_icon(self.icons["trash"] if self.is_adding_account else self.icons["add"])
         self.add_button.set_theme(self._button_theme("accent" if self.is_adding_account else "surface"))
         self.refresh_button.set_enabled(not self.is_refreshing_all)
@@ -1339,9 +1380,9 @@ class CodexControlWindowsApp:
                 self.metrics_frame.grid_columnconfigure(column, weight=1, uniform="metrics")
 
             metrics = [
-                ("accounts", "Accounts", self.icons["metric_accounts"], self.palette["neutral"]),
-                ("live", "Live", self.icons["metric_live"], self.palette["success"]),
-                ("critical", "Critical", self.icons["metric_critical"], self.palette["warning"]),
+                ("accounts", "账号", self.icons["metric_accounts"], self.palette["neutral"]),
+                ("live", "可用", self.icons["metric_live"], self.palette["success"]),
+                ("critical", "告警", self.icons["metric_critical"], self.palette["warning"]),
             ]
             for index, (key, label, icon, tone) in enumerate(metrics):
                 tile, value_label = self._build_metric_tile(self.metrics_frame, label, "0", icon, tone)
@@ -1519,11 +1560,11 @@ class CodexControlWindowsApp:
         )
         panel.pack(fill="x")
 
-        title = "No Accounts" if not search_query else "No Matches"
+        title = "暂无账号" if not search_query else "没有匹配结果"
         message = (
-            "Add a Codex account to start tracking quota."
+            "添加 Codex 账号后即可开始跟踪额度。"
             if not self.accounts
-            else "No accounts match your current search."
+            else "没有账号匹配当前搜索。"
         )
         tk.Label(
             panel,
@@ -1586,7 +1627,7 @@ class CodexControlWindowsApp:
         if is_active:
             active_chip = self._make_inline_chip(
                 title_row,
-                "Active",
+                "当前",
                 self.palette["accent_soft"],
                 self.palette["accent"],
             )
@@ -1596,7 +1637,7 @@ class CodexControlWindowsApp:
         if account.source is StoredAccountSource.AMBIENT:
             system_chip = self._make_inline_chip(
                 title_row,
-                "System",
+                "系统",
                 self.palette["panel_alt"],
                 self.palette["muted"],
             )
@@ -1648,7 +1689,7 @@ class CodexControlWindowsApp:
             quick_actions.pack(anchor="e", pady=(8, 0))
             self._make_button(
                 quick_actions,
-                "Switch",
+                "切换",
                 lambda: self.switch_account(account),
                 kind="surface_tiny",
                 icon=self.icons["add"],
@@ -1708,23 +1749,23 @@ class CodexControlWindowsApp:
         actions.pack(fill="x")
 
         button_specs: list[tuple[str, Callable[[], None], str, str | None]] = [
-            ("Refresh", lambda: self.refresh_account(account), "surface_small", self.icons["refresh"]),
+            ("刷新", lambda: self.refresh_account(account), "surface_small", self.icons["refresh"]),
         ]
         if is_active:
-            button_specs.append(("Active", lambda: None, "surface_small", self.icons["spark"]))
+            button_specs.append(("当前", lambda: None, "surface_small", self.icons["spark"]))
         elif self._can_switch_account(account):
-            button_specs.append(("Switch", lambda: self.switch_account(account), "surface_small", self.icons["add"]))
-        button_specs.append(("Reauth", lambda: self.reauthenticate(account), "surface_small", self.icons["spark"]))
-        button_specs.append(("Folder", lambda: self.open_folder(account), "surface_small", self.icons["folder"]))
+            button_specs.append(("切换", lambda: self.switch_account(account), "surface_small", self.icons["add"]))
+        button_specs.append(("重登", lambda: self.reauthenticate(account), "surface_small", self.icons["spark"]))
+        button_specs.append(("文件夹", lambda: self.open_folder(account), "surface_small", self.icons["folder"]))
         if account.source.owns_files:
-            button_specs.append(("Remove", lambda: self.remove_account(account), "danger_small", self.icons["trash"]))
+            button_specs.append(("移除", lambda: self.remove_account(account), "danger_small", self.icons["trash"]))
 
         self._render_action_buttons(actions, button_specs, width_hint)
 
         if not account.source.owns_files:
             tk.Label(
                 actions,
-                text="System account",
+                text="系统账号",
                 bg=card_bg,
                 fg=self.palette["muted"],
                 font=self.fonts["body_small"],
@@ -1777,7 +1818,7 @@ class CodexControlWindowsApp:
 
         save_button = self._make_button(
             label_row,
-            "Save",
+            "保存",
             lambda: self.update_nickname(account.id),
             kind="surface_small",
             icon=self.icons["save"],
@@ -1801,7 +1842,7 @@ class CodexControlWindowsApp:
         if state.snapshot is not None and state.snapshot.next_reset_at is not None:
             tk.Label(
                 footer,
-                text=f"Next reset {state.snapshot.next_reset_at.astimezone().strftime('%b %d %H:%M')}",
+                text=f"下次刷新 {state.snapshot.next_reset_at.astimezone().strftime('%m月%d日 %H:%M')}",
                 bg=card_bg,
                 fg=self.palette["muted"],
                 font=self.fonts["caption"],
@@ -1864,14 +1905,14 @@ class CodexControlWindowsApp:
         footer.pack(fill="x")
         tk.Label(
             footer,
-            text=f"Used {window.used_percent:.0f}%",
+            text=f"已用 {window.used_percent:.0f}%",
             bg=self.palette["panel_alt"],
             fg=self.palette["muted"],
             font=self.fonts["caption"],
         ).pack(side="left")
         tk.Label(
             footer,
-            text=window.compact_reset_at_display or "Reset unknown",
+            text=window.compact_reset_at_display or "刷新时间未知",
             bg=self.palette["panel_alt"],
             fg=self.palette["muted"],
             font=self.fonts["caption"],
@@ -1923,12 +1964,12 @@ class CodexControlWindowsApp:
         footer.pack(fill="x")
         tk.Label(
             footer,
-            text=f"Used {window.used_percent:.0f}%",
+            text=f"已用 {window.used_percent:.0f}%",
             bg=self.palette["panel_alt"],
             fg=self.palette["muted"],
             font=self.fonts["caption"],
         ).pack(side="left")
-        reset_text = window.compact_reset_at_display or "Reset unknown"
+        reset_text = window.compact_reset_at_display or "刷新时间未知"
         tk.Label(
             footer,
             text=reset_text,
@@ -1946,21 +1987,21 @@ class CodexControlWindowsApp:
         if self.status_message:
             return self.status_message
         if presentation.low_quota_count > 0:
-            return f"{presentation.account_count} accounts, {presentation.low_quota_count} critical"
-        return f"{presentation.account_count} accounts"
+            return f"{presentation.account_count} 个账号，{presentation.low_quota_count} 个告警"
+        return f"{presentation.account_count} 个账号"
 
     def _status_text(self, state: AccountRuntimeState) -> str:
         if state.is_loading:
-            return "Syncing"
+            return "同步中"
         if state.error_message:
-            return "Attention"
+            return "需处理"
         if state.snapshot is None:
-            return "Pending"
+            return "等待"
         if state.snapshot.has_usable_quota_now:
-            return "Available"
+            return "可用"
         if state.snapshot.is_quota_blocked:
-            return "Blocked"
-        return "Limited"
+            return "已受限"
+        return "额度低"
 
     def _status_value_text(self, state: AccountRuntimeState) -> str:
         if state.snapshot is not None:
@@ -1971,14 +2012,14 @@ class CodexControlWindowsApp:
 
     def _inline_message(self, state: AccountRuntimeState) -> str:
         if state.is_loading:
-            return "Refreshing live quota data..."
+            return "正在刷新实时额度数据..."
         if state.error_message:
             return state.error_message
         if state.snapshot is None:
-            return "Waiting for data."
+            return "等待数据。"
         if state.snapshot.is_quota_blocked:
-            return "Quota reached."
-        return "No quota data."
+            return "额度已用尽。"
+        return "暂无额度数据。"
 
     def _status_color(self, state: AccountRuntimeState) -> str:
         if state.error_message:

@@ -118,6 +118,7 @@ class FloatingOverlay:
         on_refresh: Callable[[], None] | None = None,
         on_task_open: Callable[[str], None] | None = None,
         on_panel_viewed: Callable[[], None] | None = None,
+        on_hide_requested: Callable[[], None] | None = None,
     ) -> None:
         self.parent = parent
         self.settings_store = settings_store or OverlaySettingsStore()
@@ -125,6 +126,7 @@ class FloatingOverlay:
         self.on_refresh = on_refresh or (lambda: None)
         self.on_task_open = on_task_open or (lambda _thread_id: None)
         self.on_panel_viewed = on_panel_viewed or (lambda: None)
+        self.on_hide_requested = on_hide_requested or self.hide
         self.model = build_overlay_view_model(
             aggregate=AggregateStatus(ActivityStatus.IDLE, 0, 0),
             badge=BadgeState(),
@@ -163,7 +165,7 @@ class FloatingOverlay:
         self.canvas.bind("<ButtonRelease-1>", self._release)
         self.canvas.bind("<Enter>", self._reveal)
         self.canvas.bind("<Leave>", lambda _event: self._schedule_hide())
-        self.canvas.bind("<Button-3>", lambda _event: self.hide())
+        self.canvas.bind("<Button-3>", lambda _event: self.on_hide_requested())
         self._render_ball()
 
     def show(self) -> None:
@@ -184,6 +186,8 @@ class FloatingOverlay:
             self.window.destroy()
 
     def update(self, model: OverlayViewModel) -> None:
+        if model == self.model:
+            return
         self.model = model
         hidden_edge = None
         if (

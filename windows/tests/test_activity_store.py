@@ -9,6 +9,7 @@ from uuid import UUID
 
 from codexcontrol_windows.activity_models import ActivityEvent, ActivityStatus, EventType
 from codexcontrol_windows.activity_store import ActivityStore, append_event
+from codexcontrol_windows.app import activity_poll_render_decision
 
 
 NOW = datetime(2026, 7, 12, 12, 0, tzinfo=timezone.utc)
@@ -118,6 +119,57 @@ class ActivityStoreTests(unittest.TestCase):
 
         self.assertEqual(restored.applied_event_count, 1)
         self.assertEqual(restored.tasks["thread-a"].status, ActivityStatus.COMPLETED)
+
+
+class ActivityPollRenderDecisionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.events = self.root / "activity-events.jsonl"
+        self.state = self.root / "activity-state.json"
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def test_unchanged_idle_poll_does_not_request_render(self) -> None:
+        snapshot = ActivityStore(self.events, self.state).poll()
+
+        health, should_render = activity_poll_render_decision(
+            current_health="Codex 状态连接正常",
+            snapshot=snapshot,
+            error=None,
+            events_file_exists=True,
+        )
+
+        self.assertEqual(health, "Codex 状态连接正常")
+        self.assertFalse(should_render)
+
+    def test_new_activity_event_requests_render(self) -> None:
+        append_event(self.events, event(1, EventType.TURN_STARTED))
+        snapshot = ActivityStore(self.events, self.state).poll()
+
+        health, should_render = activity_poll_render_decision(
+            current_health="Codex 状态连接正常",
+            snapshot=snapshot,
+            error=None,
+            events_file_exists=True,
+        )
+
+        self.assertEqual(health, "Codex 状态连接正常")
+        self.assertTrue(should_render)
+
+    def test_first_successful_connection_status_requests_render(self) -> None:
+        snapshot = ActivityStore(self.events, self.state).poll()
+
+        health, should_render = activity_poll_render_decision(
+            current_health="等待 Codex 事件",
+            snapshot=snapshot,
+            error=None,
+            events_file_exists=True,
+        )
+
+        self.assertEqual(health, "Codex 状态连接正常")
+        self.assertTrue(should_render)
 
 
 if __name__ == "__main__":

@@ -125,5 +125,21 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(snapshot.plan_display_name, "Team")
 
 
+class UsageWindowDisplayTests(unittest.TestCase):
+    def test_standard_windows_use_chinese_display_names(self) -> None:
+        five_hours = UsageWindowSnapshot(used_percent=50, reset_at=None, limit_window_seconds=18_000)
+        seven_days = UsageWindowSnapshot(used_percent=50, reset_at=None, limit_window_seconds=604_800)
+
+        self.assertEqual(five_hours.display_name, "5 小时")
+        self.assertEqual(seven_days.display_name, "7 天")
+
+    def test_custom_windows_use_chinese_units(self) -> None:
+        hours = UsageWindowSnapshot(used_percent=50, reset_at=None, limit_window_seconds=10_800)
+        days = UsageWindowSnapshot(used_percent=50, reset_at=None, limit_window_seconds=172_800)
+
+        self.assertEqual(hours.display_name, "3 小时")
+        self.assertEqual(days.display_name, "2 天")
+
+
 if __name__ == "__main__":
     unittest.main()

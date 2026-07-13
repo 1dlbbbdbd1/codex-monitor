@@ -5,7 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from codexcontrol_windows.overlay_geometry import DockEdge, OverlayPlacement, Point
-from codexcontrol_windows.settings_store import OverlaySettings, OverlaySettingsStore
+from codexcontrol_windows.settings_store import OverlaySettings, OverlaySettingsStore, overlay_settings_with_visibility
 
 
 class OverlaySettingsStoreTests(unittest.TestCase):
@@ -48,6 +48,26 @@ class OverlaySettingsStoreTests(unittest.TestCase):
 
             self.assertIsNone(restored.placement)
             self.assertEqual(path.read_text(encoding="utf-8"), "not-json")
+
+    def test_visibility_update_preserves_placement_and_auto_hide(self) -> None:
+        placement = OverlayPlacement(
+            monitor_name="DISPLAY2",
+            normalized_x=1.0,
+            normalized_y=0.4,
+            position=Point(2500, 400),
+            edge=DockEdge.RIGHT,
+        )
+        settings = OverlaySettings(
+            placement=placement,
+            overlay_enabled=True,
+            auto_hide=False,
+        )
+
+        updated = overlay_settings_with_visibility(settings, False)
+
+        self.assertEqual(updated.placement, placement)
+        self.assertFalse(updated.overlay_enabled)
+        self.assertFalse(updated.auto_hide)
 
 
 if __name__ == "__main__":

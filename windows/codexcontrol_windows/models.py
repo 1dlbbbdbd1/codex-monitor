@@ -63,8 +63,8 @@ class StoredAccountSource(str, Enum):
     @property
     def display_name(self) -> str:
         if self is StoredAccountSource.AMBIENT:
-            return "System"
-        return "Managed"
+            return "系统"
+        return "应用管理"
 
     @property
     def owns_files(self) -> bool:
@@ -286,15 +286,15 @@ class UsageWindowSnapshot:
     @property
     def display_name(self) -> str:
         if self.limit_window_seconds == 18_000:
-            return "5 Hours"
+            return "5 小时"
         if self.limit_window_seconds == 604_800:
-            return "7 Days"
+            return "7 天"
 
         hours = self.limit_window_seconds / 3600
         if hours < 24:
-            return f"{round(hours):.0f} Hours"
+            return f"{round(hours):.0f} 小时"
         days = hours / 24
-        return f"{round(days):.0f} Days"
+        return f"{round(days):.0f} 天"
 
     @property
     def short_label(self) -> str:
@@ -313,13 +313,13 @@ class UsageWindowSnapshot:
     def reset_at_display(self) -> str | None:
         if self.reset_at is None:
             return None
-        return self.reset_at.astimezone().strftime("%b %d, %Y %H:%M")
+        return self.reset_at.astimezone().strftime("%m月%d日 %H:%M")
 
     @property
     def compact_reset_at_display(self) -> str | None:
         if self.reset_at is None:
             return None
-        return self.reset_at.astimezone().strftime("%b %d %H:%M")
+        return self.reset_at.astimezone().strftime("%m月%d日 %H:%M")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -346,12 +346,12 @@ class CreditsBalanceSnapshot:
     @property
     def display_value(self) -> str:
         if self.unlimited:
-            return "Unlimited"
+            return "不限量"
         if self.balance is not None:
             return f"{self.balance:.2f}".rstrip("0").rstrip(".")
         if self.has_credits:
-            return "Available"
-        return "None"
+            return "可用"
+        return "无"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -430,7 +430,7 @@ class AccountUsageSnapshot:
     @property
     def plan_display_name(self) -> str:
         if not self.plan:
-            return "Unknown"
+            return "未知"
         return " ".join(piece[:1].upper() + piece[1:].lower() for piece in self.plan.replace("_", " ").split())
 
     def to_dict(self) -> dict[str, Any]:
