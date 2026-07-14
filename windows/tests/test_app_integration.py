@@ -57,6 +57,27 @@ class OverlayViewModelTests(unittest.TestCase):
         self.assertEqual(model.quota_rows[0].remaining_text, "73%")
         self.assertEqual(model.task_rows[0].title, "构建第一版悬浮球")
 
+    def test_untitled_tasks_use_a_private_safe_session_suffix(self) -> None:
+        task = TaskProjection(
+            thread_id="4af3beef",
+            turn_id="turn-1",
+            task_title=None,
+            project_name="codex monitor",
+            cwd=r"D:\Hprogram\Hezh\codex monitor",
+            status=ActivityStatus.WORKING,
+            updated_at=NOW,
+        )
+
+        model = build_overlay_view_model(
+            aggregate=AggregateStatus(ActivityStatus.WORKING, 1, 0),
+            badge=BadgeState(),
+            quota_rows=(),
+            tasks=(task,),
+            health_text="已连接",
+        )
+
+        self.assertEqual(model.task_rows[0].title, "codex monitor · 任务 BEEF")
+
     def test_default_quota_mode_selects_five_hour_window(self) -> None:
         self.assertIn("mode", {field.name for field in fields(QuotaRow)})
         self.assertIn("quota_mode", signature(build_overlay_view_model).parameters)

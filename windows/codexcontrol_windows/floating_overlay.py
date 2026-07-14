@@ -97,7 +97,7 @@ def build_overlay_view_model(
     task_rows = () if activity_stale else tuple(
         TaskRow(
             thread_id=task.thread_id,
-            title=task.task_title or task.project_name or "Codex 任务",
+            title=_task_title(task),
             project=task.project_name or "未命名项目",
             status=task.status,
             status_text=_STATUS_TEXT[task.status],
@@ -124,6 +124,14 @@ def build_overlay_view_model(
         quota_label={"5h": "5小时", "7d": "7天"}.get(selected_mode, selected_mode or "额度"),
         available_quota_modes=tuple(row.mode for row in rows if row.mode in {"5h", "7d"}),
     )
+
+
+def _task_title(task: TaskProjection) -> str:
+    if task.task_title:
+        return task.task_title
+    if task.project_name:
+        return f"{task.project_name} · 任务 {task.thread_id[-4:].upper()}"
+    return "Codex 任务"
 
 
 class FloatingOverlay:
