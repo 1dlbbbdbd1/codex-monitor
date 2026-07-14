@@ -9,7 +9,6 @@
             "command": "CodexFloatingCompanion.exe --emit-hook",
             "commandWindows": "CodexFloatingCompanion.exe --emit-hook",
             "timeout": 5,
-            "async": true,
             "statusMessage": "Codex Floating Companion · UserPromptSubmit"
           }
         ]
@@ -23,7 +22,6 @@
             "command": "CodexFloatingCompanion.exe --emit-hook",
             "commandWindows": "CodexFloatingCompanion.exe --emit-hook",
             "timeout": 5,
-            "async": true,
             "statusMessage": "Codex Floating Companion · PermissionRequest"
           }
         ]
@@ -37,7 +35,6 @@
             "command": "CodexFloatingCompanion.exe --emit-hook",
             "commandWindows": "CodexFloatingCompanion.exe --emit-hook",
             "timeout": 5,
-            "async": true,
             "statusMessage": "Codex Floating Companion · PostToolUse"
           }
         ]
@@ -51,7 +48,6 @@
             "command": "CodexFloatingCompanion.exe --emit-hook",
             "commandWindows": "CodexFloatingCompanion.exe --emit-hook",
             "timeout": 5,
-            "async": true,
             "statusMessage": "Codex Floating Companion · Stop"
           }
         ]

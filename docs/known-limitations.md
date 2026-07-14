@@ -1,7 +1,7 @@
 # v0.1.0 已知限制
 
 - 首版仅构建和验证 Windows x64；未提供 macOS 或 Linux 悬浮层。
-- 工作状态依赖当前 Codex Desktop 支持的 hooks。Codex 更新 hooks schema 后，可能需要从托盘执行“修复 Codex 状态连接”。
+- 工作状态依赖当前 Codex Desktop 支持的同步 command hooks。安装或修复后，仍需在 Codex 输入 `/hooks` 确认信任并重启 Codex；Codex 更新 hooks schema 后，也可能需要从托盘执行“修复 Codex 状态连接”。
 - 当前公开 hooks 不能稳定提供任务标题和精确任务跳转。面板使用项目名等安全元数据，点击任务会激活 Codex 窗口供用户定位。
 - `Stop` 事件只能确认本轮结束，不能可靠区分所有失败原因；失败状态接口已经保留，后续有可靠公开事件时再接入。
 - 额度来自本机 Codex 登录凭据和 ChatGPT usage 端点；未登录、网络异常或服务端字段变化时会显示无数据，不会伪造额度。

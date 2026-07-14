@@ -16,6 +16,7 @@ class OverlaySettings:
     overlay_enabled: bool = True
     auto_hide: bool = True
     always_on_top: bool = True
+    quota_mode: str = "5h"
 
 
 def overlay_settings_with_visibility(settings: OverlaySettings, visible: bool) -> OverlaySettings:
@@ -24,6 +25,7 @@ def overlay_settings_with_visibility(settings: OverlaySettings, visible: bool) -
         overlay_enabled=visible,
         auto_hide=settings.auto_hide,
         always_on_top=settings.always_on_top,
+        quota_mode=settings.quota_mode,
     )
 
 
@@ -33,6 +35,17 @@ def overlay_settings_with_topmost(settings: OverlaySettings, always_on_top: bool
         overlay_enabled=settings.overlay_enabled,
         auto_hide=settings.auto_hide,
         always_on_top=always_on_top,
+        quota_mode=settings.quota_mode,
+    )
+
+
+def overlay_settings_with_quota_mode(settings: OverlaySettings, quota_mode: str) -> OverlaySettings:
+    return OverlaySettings(
+        placement=settings.placement,
+        overlay_enabled=settings.overlay_enabled,
+        auto_hide=settings.auto_hide,
+        always_on_top=settings.always_on_top,
+        quota_mode=quota_mode if quota_mode in {"5h", "7d"} else "5h",
     )
 
 
@@ -54,6 +67,7 @@ class OverlaySettingsStore:
                 overlay_enabled=bool(payload.get("overlayEnabled", True)),
                 auto_hide=bool(payload.get("autoHide", True)),
                 always_on_top=bool(payload.get("alwaysOnTop", True)),
+                quota_mode=str(payload.get("quotaMode", "5h")) if payload.get("quotaMode", "5h") in {"5h", "7d"} else "5h",
             )
         except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
             return OverlaySettings()
@@ -66,6 +80,7 @@ class OverlaySettingsStore:
             "overlayEnabled": settings.overlay_enabled,
             "autoHide": settings.auto_hide,
             "alwaysOnTop": settings.always_on_top,
+            "quotaMode": settings.quota_mode,
         }
         temporary = self.path.with_suffix(f"{self.path.suffix}.tmp")
         temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")

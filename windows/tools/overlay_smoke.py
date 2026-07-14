@@ -22,7 +22,11 @@ def main() -> None:
         build_overlay_view_model(
             aggregate=AggregateStatus(ActivityStatus.WORKING, 1, 0),
             badge=BadgeState(completion=True),
-            quota_rows=(QuotaRow("5 小时", 73, "14:30 刷新"), QuotaRow("7 天", 41, "周一 09:00 刷新")),
+            quota_rows=(
+                QuotaRow("5 小时", 73, "14:30 刷新", mode="5h"),
+                QuotaRow("7 天", 41, "周一 09:00 刷新", mode="7d"),
+            ),
+            quota_mode="5h",
             tasks=(task,),
             health_text="Codex 事件桥已连接",
         )

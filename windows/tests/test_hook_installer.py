@@ -1,24 +1,27 @@
 from __future__ import annotations
 
 import json
+import shutil
 import unittest
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 from codexcontrol_windows.hook_installer import HookInstallError, HookInstaller, count_companion_hooks
 
 
 class HookInstallerTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temp = TemporaryDirectory()
-        self.root = Path(self.temp.name)
+        self.root = Path("test-artifacts") / "hook-installer"
+        if self.root.exists():
+            shutil.rmtree(self.root)
+        self.root.mkdir(parents=True)
         self.hooks_path = self.root / ".codex" / "hooks.json"
         self.backup_dir = self.root / "backups"
         self.installer = HookInstaller(self.hooks_path, self.backup_dir)
         self.executable = self.root / "CodexFloatingCompanion.exe"
 
     def tearDown(self) -> None:
-        self.temp.cleanup()
+        if self.root.exists():
+            shutil.rmtree(self.root)
 
     def test_install_preserves_unrelated_hooks_and_is_idempotent(self) -> None:
         self.hooks_path.parent.mkdir(parents=True)
@@ -48,7 +51,9 @@ class HookInstallerTests(unittest.TestCase):
         self.assertEqual(result["description"], "user hooks")
         self.assertEqual(result["hooks"]["Stop"][0]["hooks"][0]["command"], "existing-tool")
         self.assertEqual(count_companion_hooks(result), 4)
-        self.assertTrue(all("statusMessage" in handler for handler in companion_handlers(result)))
+        handlers = companion_handlers(result)
+        self.assertTrue(all("statusMessage" in handler for handler in handlers))
+        self.assertTrue(all("async" not in handler for handler in handlers))
 
     def test_install_creates_backup_before_replacing_existing_file(self) -> None:
         self.hooks_path.parent.mkdir(parents=True)

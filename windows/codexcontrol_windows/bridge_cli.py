@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import json
 import sys
 from datetime import datetime, timezone
@@ -20,6 +21,27 @@ _HOOK_EVENT_MAP = {
     "PostToolUse": EventType.APPROVAL_RESOLVED,
     "Stop": EventType.TURN_COMPLETED,
 }
+
+_GUI_MUTEX_NAME = "Local\\CodexFloatingCompanion.SingleInstance"
+_GUI_INSTANCE_HANDLE: int | None = None
+_ERROR_ALREADY_EXISTS = 183
+
+
+def acquire_gui_instance() -> bool:
+    """Keep hook commands multi-process while allowing only one GUI process."""
+    global _GUI_INSTANCE_HANDLE
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_mutex = kernel32.CreateMutexW
+    create_mutex.argtypes = [ctypes.c_void_p, ctypes.c_bool, ctypes.c_wchar_p]
+    create_mutex.restype = ctypes.c_void_p
+    handle = create_mutex(None, False, _GUI_MUTEX_NAME)
+    if not handle:
+        return True
+    if ctypes.get_last_error() == _ERROR_ALREADY_EXISTS:
+        kernel32.CloseHandle(handle)
+        return False
+    _GUI_INSTANCE_HANDLE = handle
+    return True
 
 
 def normalize_hook_payload(payload: dict[str, object], *, now: datetime | None = None) -> ActivityEvent:
@@ -76,6 +98,7 @@ def dispatch(
     now: datetime | None = None,
     hook_installer: HookInstaller | None = None,
     executable: Path | None = None,
+    acquire_instance: Callable[[], bool] | None = None,
 ) -> int:
     if "--emit-hook" in argv:
         bridge_arguments = [argument for argument in argv if argument != "--emit-hook"]
@@ -92,5 +115,7 @@ def dispatch(
             return 0
         except Exception:
             return 1
+    if not (acquire_instance or acquire_gui_instance)():
+        return 0
     gui_main(argv)
     return 0

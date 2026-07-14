@@ -5,6 +5,52 @@ import math
 from PIL import Image, ImageDraw, ImageFilter
 
 
+def build_quota_dial_icon(
+    size: int,
+    *,
+    remaining_percent: float,
+    accent: str,
+    fill: str = "#111512",
+    track: str = "#303731",
+    border: str = "#3a423b",
+    scale_factor: int = 4,
+) -> Image.Image:
+    if scale_factor > 1:
+        large = build_quota_dial_icon(
+            size * scale_factor,
+            remaining_percent=remaining_percent,
+            accent=accent,
+            fill=fill,
+            track=track,
+            border=border,
+            scale_factor=1,
+        )
+        return large.resize((size, size), Image.Resampling.LANCZOS)
+
+    percent = min(100.0, max(0.0, remaining_percent))
+    image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    outer = max(1, round(size * 0.045))
+    draw.ellipse((outer, outer, size - outer, size - outer), fill=fill, outline=border, width=max(1, round(size * 0.025)))
+
+    ring_inset = round(size * 0.11)
+    ring_bounds = (ring_inset, ring_inset, size - ring_inset, size - ring_inset)
+    ring_width = max(2, round(size * 0.075))
+    draw.arc(ring_bounds, start=0, end=359, fill=track, width=ring_width)
+    if percent >= 99.95:
+        draw.arc(ring_bounds, start=0, end=359, fill=accent, width=ring_width)
+    elif percent > 0:
+        _draw_arc_with_round_caps(
+            draw,
+            ring_bounds,
+            start_angle=-90,
+            end_angle=-90 + (percent * 3.6),
+            fill=accent,
+            width=ring_width,
+        )
+    return image
+
+
 def build_orbit_dial_icon(
     size: int,
     *,

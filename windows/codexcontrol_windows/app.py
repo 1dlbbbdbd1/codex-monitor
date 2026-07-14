@@ -443,7 +443,7 @@ class CodexControlWindowsApp:
         self._configure_styles()
         self._build_ui()
         self.root.update_idletasks()
-        self._apply_dark_title_bar()
+        self._apply_light_title_bar()
         self._setup_tray_icon()
         self._load_initial_state()
         for state in self.runtime_states.values():
@@ -456,6 +456,7 @@ class CodexControlWindowsApp:
             on_panel_viewed=self._acknowledge_companion_panel,
             on_hide_requested=lambda: self._set_floating_overlay_visible(False),
             on_repair_requested=self._repair_companion_integration,
+            on_quota_mode_changed=lambda _mode: self._update_floating_overlay(),
         )
         self._overlay_visible = self.floating_overlay.settings.overlay_enabled
         self._render_now()
@@ -1240,14 +1241,14 @@ class CodexControlWindowsApp:
             self._activity_health = next_health
             self._activity_stale = next_stale
             if should_render:
-                self._render()
+                self._update_floating_overlay()
         elif error is not None:
             next_stale = self._activity_health_is_stale(next_health)
             should_render = should_render or next_stale != self._activity_stale
             self._activity_health = next_health
             self._activity_stale = next_stale
             if should_render:
-                self._render()
+                self._update_floating_overlay()
         if not self._quitting:
             self._activity_poll_job = self.root.after(self.ACTIVITY_POLL_MS, self._activity_poll_tick)
 
@@ -1258,6 +1259,7 @@ class CodexControlWindowsApp:
             aggregate=aggregate_tasks(visible_tasks),
             badge=self.notification_state.badge,
             quota_rows=self._companion_quota_rows(),
+            quota_mode=self.floating_overlay.settings.quota_mode,
             tasks=visible_tasks,
             health_text=self._activity_health,
             activity_stale=self._activity_stale,
@@ -1288,6 +1290,7 @@ class CodexControlWindowsApp:
                 label=f"{account.display_name} · {window.short_label}",
                 remaining_percent=window.remaining_percent,
                 reset_text=window.compact_reset_at_display or "刷新时间未知",
+                mode=window.short_label,
             )
             for window in (snapshot.primary_window, snapshot.secondary_window)
             if window is not None
@@ -1350,7 +1353,7 @@ class CodexControlWindowsApp:
         executable = Path(sys.executable if getattr(sys, "frozen", False) else sys.argv[0]).resolve()
         try:
             HookInstaller().install(executable)
-            self._activity_health = "Codex 状态连接已修复，下一次操作后生效"
+            self._activity_health = "状态连接已更新，请在 Codex 的 /hooks 中确认信任后重启 Codex"
         except Exception as error:
             self._activity_health = f"修复失败：{error}"
         self._render()
@@ -1827,7 +1830,7 @@ class CodexControlWindowsApp:
             actions_meta.pack(fill="x", pady=(8, 0))
             tk.Label(
                 actions_meta,
-                text=state.snapshot.updated_at.astimezone().strftime("Updated %H:%M"),
+                text=state.snapshot.updated_at.astimezone().strftime("更新于 %H:%M"),
                 bg=card_bg,
                 fg=self.palette["muted"],
                 font=self.fonts["caption"],
@@ -2115,24 +2118,24 @@ class CodexControlWindowsApp:
             return RoundedButtonTheme(
                 bg=self.palette["accent_soft"],
                 fg=self.palette["accent"],
-                hover="#184247",
+                hover=self.palette["accent_line"],
                 border=self.palette["accent_line"],
                 disabled_bg=self.palette["panel_alt"],
                 disabled_fg=self.palette["neutral"],
             )
         if kind == "danger_small":
             return RoundedButtonTheme(
-                bg="#351d21",
+                bg="#fff0f0",
                 fg=self.palette["danger"],
-                hover="#46262c",
-                border="#5a3338",
+                hover="#ffe2e2",
+                border="#f1b6b6",
                 disabled_bg=self.palette["panel_alt"],
                 disabled_fg=self.palette["neutral"],
             )
         return RoundedButtonTheme(
             bg=self.palette["panel_alt"],
             fg=self.palette["text"],
-            hover="#232d39",
+            hover="#e7e7e7",
             border=self.palette["hairline"],
             disabled_bg=self.palette["panel_alt"],
             disabled_fg=self.palette["neutral"],
@@ -2295,7 +2298,7 @@ class CodexControlWindowsApp:
         self._resize_job = None
         self._render()
 
-    def _apply_dark_title_bar(self) -> None:
+    def _apply_light_title_bar(self) -> None:
         if os.name != "nt":
             return
 
@@ -2303,7 +2306,7 @@ class CodexControlWindowsApp:
             hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id())
             if not hwnd:
                 hwnd = self.root.winfo_id()
-            value = ctypes.c_int(1)
+            value = ctypes.c_int(0)
             for attribute in (20, 19):
                 ctypes.windll.dwmapi.DwmSetWindowAttribute(
                     hwnd,

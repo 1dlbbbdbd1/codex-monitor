@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 
+import codexcontrol_windows.brand_icon as brand_icon
 from codexcontrol_windows.brand_icon import build_orbit_dial_icon
 
 
@@ -35,6 +36,15 @@ class BrandIconTests(unittest.TestCase):
         soft_alpha_values = {alpha for alpha in alpha_values if 0 < alpha < 255}
 
         self.assertGreater(len(soft_alpha_values), 8)
+
+    def test_quota_dial_changes_with_remaining_percent(self) -> None:
+        self.assertTrue(hasattr(brand_icon, "build_quota_dial_icon"))
+
+        empty = brand_icon.build_quota_dial_icon(56, remaining_percent=0, accent="#31d18b")
+        partial = brand_icon.build_quota_dial_icon(56, remaining_percent=75, accent="#31d18b")
+
+        self.assertNotEqual(empty.tobytes(), partial.tobytes())
+        self.assertTrue(any(0 < alpha < 255 for *_, alpha in partial.getdata()))
 
 
 if __name__ == "__main__":

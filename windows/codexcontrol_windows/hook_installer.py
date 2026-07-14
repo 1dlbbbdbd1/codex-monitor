@@ -64,7 +64,6 @@ class HookInstaller:
                             "command": command,
                             "commandWindows": command,
                             "timeout": 5,
-                            "async": True,
                             "statusMessage": f"{_STATUS_PREFIX}{event_name}",
                         }
                     ]

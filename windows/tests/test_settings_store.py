@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import fields
 from pathlib import Path
 
+import codexcontrol_windows.settings_store as settings_store
 from codexcontrol_windows.overlay_geometry import DockEdge, OverlayPlacement, Point
 from codexcontrol_windows.settings_store import (
     OverlaySettings,
@@ -29,6 +31,7 @@ class OverlaySettingsStoreTests(unittest.TestCase):
             pass
 
     def test_round_trip_preserves_placement_and_behavior(self) -> None:
+        self.assertIn("quota_mode", {field.name for field in fields(OverlaySettings)})
         path = self.root / "settings.json"
         store = OverlaySettingsStore(path)
         expected = OverlaySettings(
@@ -42,6 +45,7 @@ class OverlaySettingsStoreTests(unittest.TestCase):
             overlay_enabled=True,
             auto_hide=True,
             always_on_top=False,
+            quota_mode="7d",
         )
 
         store.save(expected)
@@ -56,6 +60,7 @@ class OverlaySettingsStoreTests(unittest.TestCase):
         self.assertTrue(restored.overlay_enabled)
         self.assertTrue(restored.auto_hide)
         self.assertTrue(restored.always_on_top)
+        self.assertEqual(getattr(restored, "quota_mode", None), "5h")
         self.assertIsNone(restored.placement)
 
     def test_malformed_file_returns_defaults_without_overwriting_it(self) -> None:
@@ -99,6 +104,23 @@ class OverlaySettingsStoreTests(unittest.TestCase):
 
         updated = overlay_settings_with_topmost(settings, False)
 
+        self.assertFalse(updated.overlay_enabled)
+        self.assertFalse(updated.auto_hide)
+        self.assertFalse(updated.always_on_top)
+
+    def test_quota_mode_update_preserves_other_behavior(self) -> None:
+        self.assertTrue(hasattr(settings_store, "overlay_settings_with_quota_mode"))
+        settings = OverlaySettings(
+            placement=None,
+            overlay_enabled=False,
+            auto_hide=False,
+            always_on_top=False,
+            quota_mode="5h",
+        )
+
+        updated = settings_store.overlay_settings_with_quota_mode(settings, "7d")
+
+        self.assertEqual(updated.quota_mode, "7d")
         self.assertFalse(updated.overlay_enabled)
         self.assertFalse(updated.auto_hide)
         self.assertFalse(updated.always_on_top)

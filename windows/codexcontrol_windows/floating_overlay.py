@@ -8,10 +8,10 @@ from typing import Callable, Iterable, Sequence
 from PIL import ImageTk
 
 from .activity_models import ActivityStatus, AggregateStatus, TaskProjection
-from .brand_icon import build_orbit_dial_icon
+from .brand_icon import build_quota_dial_icon
 from .notification_state import BadgeState
 from .overlay_geometry import DockEdge, Monitor, Point, Rect, Size, dock_target, hidden_target, recover_to_monitors
-from .settings_store import OverlaySettings, OverlaySettingsStore
+from .settings_store import OverlaySettings, OverlaySettingsStore, overlay_settings_with_quota_mode
 from .ui_theme import CODEX_DARK_PALETTE
 
 
@@ -26,6 +26,7 @@ class QuotaRow:
     label: str
     remaining_percent: float
     reset_text: str
+    mode: str = ""
 
     @property
     def remaining_text(self) -> str:
@@ -54,6 +55,11 @@ class OverlayViewModel:
     task_rows: tuple[TaskRow, ...]
     health_text: str
     activity_stale: bool
+    quota_mode: str
+    quota_percent: float | None
+    quota_percent_text: str
+    quota_label: str
+    available_quota_modes: tuple[str, ...]
 
 
 _STATUS_TEXT = {
@@ -80,10 +86,14 @@ def build_overlay_view_model(
     aggregate: AggregateStatus,
     badge: BadgeState,
     quota_rows: Sequence[QuotaRow],
+    quota_mode: str = "5h",
     tasks: Iterable[TaskProjection],
     health_text: str,
     activity_stale: bool = False,
 ) -> OverlayViewModel:
+    rows = tuple(quota_rows)
+    selected_quota = next((row for row in rows if row.mode == quota_mode), rows[0] if rows else None)
+    selected_mode = selected_quota.mode if selected_quota else quota_mode
     task_rows = () if activity_stale else tuple(
         TaskRow(
             thread_id=task.thread_id,
@@ -104,10 +114,15 @@ def build_overlay_view_model(
         badge_visible=badge.visible,
         badge_color=CODEX_DARK_PALETTE["danger"] if urgent_badge else CODEX_DARK_PALETTE["info"],
         keep_handle_visible=badge.visible,
-        quota_rows=tuple(quota_rows),
+        quota_rows=rows,
         task_rows=task_rows,
         health_text=health_text,
         activity_stale=activity_stale,
+        quota_mode=selected_mode,
+        quota_percent=selected_quota.remaining_percent if selected_quota else None,
+        quota_percent_text=selected_quota.remaining_text if selected_quota else "--",
+        quota_label={"5h": "5小时", "7d": "7天"}.get(selected_mode, selected_mode or "额度"),
+        available_quota_modes=tuple(row.mode for row in rows if row.mode in {"5h", "7d"}),
     )
 
 
@@ -124,6 +139,7 @@ class FloatingOverlay:
         on_panel_viewed: Callable[[], None] | None = None,
         on_hide_requested: Callable[[], None] | None = None,
         on_repair_requested: Callable[[], None] | None = None,
+        on_quota_mode_changed: Callable[[str], None] | None = None,
     ) -> None:
         self.parent = parent
         self.settings_store = settings_store or OverlaySettingsStore()
@@ -133,6 +149,7 @@ class FloatingOverlay:
         self.on_panel_viewed = on_panel_viewed or (lambda: None)
         self.on_hide_requested = on_hide_requested or self.hide
         self.on_repair_requested = on_repair_requested or (lambda: None)
+        self.on_quota_mode_changed = on_quota_mode_changed or (lambda _mode: None)
         self.model = build_overlay_view_model(
             aggregate=AggregateStatus(ActivityStatus.IDLE, 0, 0),
             badge=BadgeState(),
@@ -143,6 +160,7 @@ class FloatingOverlay:
         )
 
         self.window = tk.Toplevel(parent)
+        self.window.title("Codex 悬浮球")
         self.window.withdraw()
         self.window.overrideredirect(True)
         self.window.attributes("-topmost", self.settings.always_on_top)
@@ -188,6 +206,7 @@ class FloatingOverlay:
             overlay_enabled=self.settings.overlay_enabled,
             auto_hide=self.settings.auto_hide,
             always_on_top=always_on_top,
+            quota_mode=self.settings.quota_mode,
         )
         try:
             self.window.attributes("-topmost", always_on_top)
@@ -229,6 +248,7 @@ class FloatingOverlay:
         self._cancel_hide()
         self._reveal()
         self._panel = tk.Toplevel(self.parent)
+        self._panel.title("Codex 状态面板")
         self._panel.overrideredirect(True)
         self._panel.attributes("-topmost", self.settings.always_on_top)
         self._panel.configure(bg=CODEX_DARK_PALETTE["shell"])
@@ -239,17 +259,31 @@ class FloatingOverlay:
 
     def _render_ball(self, hidden_edge: DockEdge | None = None) -> None:
         self.canvas.delete("all")
-        image = build_orbit_dial_icon(BALL_SIZE, accent=self.model.accent_color)
+        quota_color = self._quota_color(self.model.quota_percent) if self.model.quota_percent is not None else CODEX_DARK_PALETTE["neutral"]
+        image = build_quota_dial_icon(
+            BALL_SIZE,
+            remaining_percent=self.model.quota_percent or 0,
+            accent=quota_color,
+            fill=CODEX_DARK_PALETTE["shell"],
+            track=CODEX_DARK_PALETTE["track"],
+            border=CODEX_DARK_PALETTE["hairline"],
+        )
         self._icon = ImageTk.PhotoImage(image)
         self.canvas.create_image(BALL_SIZE // 2, BALL_SIZE // 2, image=self._icon)
-        if self.model.count_text:
-            self.canvas.create_text(
-                BALL_SIZE // 2,
-                BALL_SIZE // 2 + 1,
-                text=self.model.count_text,
-                fill="#ffffff",
-                font=("Segoe UI Semibold", 10),
-            )
+        self.canvas.create_text(
+            BALL_SIZE // 2,
+            BALL_SIZE // 2 - 3,
+            text=self.model.quota_percent_text,
+            fill=CODEX_DARK_PALETTE["text"],
+            font=("Segoe UI Semibold", 11, "bold"),
+        )
+        self.canvas.create_text(
+            BALL_SIZE // 2,
+            BALL_SIZE // 2 + 10,
+            text=self.model.quota_label,
+            fill=CODEX_DARK_PALETTE["muted"],
+            font=("Microsoft YaHei UI", 6, "bold"),
+        )
         if self.model.badge_visible:
             if hidden_edge is DockEdge.RIGHT:
                 bounds = (1, 21, 13, 33)
@@ -258,6 +292,8 @@ class FloatingOverlay:
             else:
                 bounds = (40, 3, 54, 17)
             self.canvas.create_oval(*bounds, fill=self.model.badge_color, outline="#ffffff", width=2)
+        else:
+            self.canvas.create_oval(44, 5, 50, 11, fill=self.model.accent_color, outline=CODEX_DARK_PALETTE["shell"], width=1)
 
     def _render_panel(self) -> None:
         assert self._panel is not None
@@ -301,7 +337,27 @@ class FloatingOverlay:
                 pady=4,
             ).pack(fill="x", pady=(0, 12))
 
-        self._section_title(panel, "额度与刷新时间")
+        quota_header = tk.Frame(panel, bg=CODEX_DARK_PALETTE["shell"])
+        quota_header.pack(fill="x", pady=(0, 5))
+        tk.Label(quota_header, text="额度与刷新时间", fg=CODEX_DARK_PALETTE["muted"], bg=CODEX_DARK_PALETTE["shell"], font=("Microsoft YaHei UI", 10, "bold")).pack(side="left")
+        for mode, label in (("5h", "5小时"), ("7d", "7天")):
+            available = mode in self.model.available_quota_modes
+            selected = mode == self.model.quota_mode
+            tk.Button(
+                quota_header,
+                text=label,
+                command=lambda value=mode: self._set_quota_mode(value),
+                state="normal" if available else "disabled",
+                fg="#ffffff" if selected else CODEX_DARK_PALETTE["muted"],
+                disabledforeground=CODEX_DARK_PALETTE["subtle"],
+                bg=CODEX_DARK_PALETTE["accent_line"] if selected else CODEX_DARK_PALETTE["panel_alt"],
+                activebackground=CODEX_DARK_PALETTE["accent"],
+                activeforeground="#ffffff",
+                relief="flat",
+                padx=7,
+                pady=2,
+                font=("Microsoft YaHei UI", 8, "bold"),
+            ).pack(side="right", padx=(4, 0))
         if self.model.quota_rows:
             for quota in self.model.quota_rows:
                 row = tk.Frame(panel, bg=CODEX_DARK_PALETTE["panel"], padx=10, pady=7)
@@ -348,7 +404,17 @@ class FloatingOverlay:
             return CODEX_DARK_PALETTE["danger"]
         if remaining <= 20:
             return CODEX_DARK_PALETTE["warning"]
-        return CODEX_DARK_PALETTE["success"]
+        return CODEX_DARK_PALETTE["accent"]
+
+    def _set_quota_mode(self, quota_mode: str) -> None:
+        if quota_mode not in self.model.available_quota_modes:
+            return
+        self.settings = overlay_settings_with_quota_mode(self.settings, quota_mode)
+        try:
+            self.settings_store.save(self.settings)
+        except OSError:
+            pass
+        self.on_quota_mode_changed(quota_mode)
 
     def _press(self, event: tk.Event) -> None:
         self._cancel_hide()
@@ -458,6 +524,7 @@ class FloatingOverlay:
             overlay_enabled=self.settings.overlay_enabled,
             auto_hide=self.settings.auto_hide,
             always_on_top=self.settings.always_on_top,
+            quota_mode=self.settings.quota_mode,
         )
         try:
             self.settings_store.save(self.settings)

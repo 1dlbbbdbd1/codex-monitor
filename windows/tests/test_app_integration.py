@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import fields
 from datetime import datetime, timezone
+from inspect import signature
 
 from codexcontrol_windows.activity_models import ActivityStatus, AggregateStatus, TaskProjection
 from codexcontrol_windows.floating_overlay import (
@@ -54,6 +56,62 @@ class OverlayViewModelTests(unittest.TestCase):
         self.assertEqual(model.count_text, "1")
         self.assertEqual(model.quota_rows[0].remaining_text, "73%")
         self.assertEqual(model.task_rows[0].title, "构建第一版悬浮球")
+
+    def test_default_quota_mode_selects_five_hour_window(self) -> None:
+        self.assertIn("mode", {field.name for field in fields(QuotaRow)})
+        self.assertIn("quota_mode", signature(build_overlay_view_model).parameters)
+        rows = (
+            QuotaRow(label="5 小时", remaining_percent=73.0, reset_text="14:30 刷新", mode="5h"),
+            QuotaRow(label="7 天", remaining_percent=48.0, reset_text="周日刷新", mode="7d"),
+        )
+
+        model = build_overlay_view_model(
+            aggregate=AggregateStatus(ActivityStatus.IDLE, 0, 0),
+            badge=BadgeState(),
+            quota_rows=rows,
+            quota_mode="5h",
+            tasks=(),
+            health_text="已连接",
+        )
+
+        self.assertEqual(model.quota_percent_text, "73%")
+        self.assertEqual(model.quota_label, "5小时")
+        self.assertEqual(model.quota_percent, 73.0)
+
+    def test_quota_mode_can_select_seven_day_window(self) -> None:
+        self.assertIn("quota_mode", signature(build_overlay_view_model).parameters)
+        rows = (
+            QuotaRow(label="5 小时", remaining_percent=73.0, reset_text="14:30 刷新", mode="5h"),
+            QuotaRow(label="7 天", remaining_percent=48.0, reset_text="周日刷新", mode="7d"),
+        )
+
+        model = build_overlay_view_model(
+            aggregate=AggregateStatus(ActivityStatus.IDLE, 0, 0),
+            badge=BadgeState(),
+            quota_rows=rows,
+            quota_mode="7d",
+            tasks=(),
+            health_text="已连接",
+        )
+
+        self.assertEqual(model.quota_percent_text, "48%")
+        self.assertEqual(model.quota_label, "7天")
+
+    def test_missing_selected_quota_falls_back_to_available_window(self) -> None:
+        self.assertIn("quota_mode", signature(build_overlay_view_model).parameters)
+        rows = (QuotaRow(label="7 天", remaining_percent=48.0, reset_text="周日刷新", mode="7d"),)
+
+        model = build_overlay_view_model(
+            aggregate=AggregateStatus(ActivityStatus.IDLE, 0, 0),
+            badge=BadgeState(),
+            quota_rows=rows,
+            quota_mode="5h",
+            tasks=(),
+            health_text="已连接",
+        )
+
+        self.assertEqual(model.quota_percent_text, "48%")
+        self.assertEqual(model.quota_label, "7天")
 
     def test_informational_badge_is_blue_and_keeps_a_visible_edge_indicator(self) -> None:
         model = build_overlay_view_model(

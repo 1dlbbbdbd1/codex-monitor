@@ -24,8 +24,24 @@ New-Item -ItemType Directory -Path $installDir -Force | Out-Null
 Copy-Item -LiteralPath $SourceExe -Destination $installedExe -Force
 
 & $installedExe --install-hooks
-if ($LASTEXITCODE -ne 0) {
-    throw "Codex hooks installation failed. Existing hooks were left intact."
+$hooksPath = Join-Path $env:USERPROFILE ".codex\hooks.json"
+$jsonExecutable = $installedExe.Replace("\", "\\")
+$hookText = ""
+$handlerCount = 0
+for ($attempt = 0; $attempt -lt 60; $attempt++) {
+    $hookText = if (Test-Path -LiteralPath $hooksPath) {
+        Get-Content -LiteralPath $hooksPath -Raw -Encoding UTF8
+    } else {
+        ""
+    }
+    $handlerCount = ([regex]::Matches($hookText, [regex]::Escape("Codex Floating Companion"))).Count
+    if ($handlerCount -eq 4 -and $hookText -match [regex]::Escape($jsonExecutable)) {
+        break
+    }
+    Start-Sleep -Milliseconds 150
+}
+if ($handlerCount -ne 4 -or $hookText -notmatch [regex]::Escape($jsonExecutable)) {
+    throw "Codex hooks installation did not produce four companion handlers."
 }
 
 if ($EnableStartup) {

@@ -6,11 +6,13 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+from unittest.mock import Mock
 from uuid import UUID
 
 from codexcontrol_windows.activity_models import ActivityEvent, ActivityStatus, EventType
-from codexcontrol_windows.activity_store import ActivityStore, append_event
-from codexcontrol_windows.app import activity_connection_health, activity_poll_render_decision
+from codexcontrol_windows.activity_store import ActivitySnapshot, ActivityStore, append_event
+from codexcontrol_windows.app import CodexControlWindowsApp, activity_connection_health, activity_poll_render_decision
 
 
 NOW = datetime(2026, 7, 12, 12, 0, tzinfo=timezone.utc)
@@ -158,6 +160,34 @@ class ActivityPollRenderDecisionTests(unittest.TestCase):
 
         self.assertEqual(health, "Codex 状态连接正常")
         self.assertTrue(should_render)
+
+
+class ActivityPollUiUpdateTests(unittest.TestCase):
+    def test_activity_event_updates_overlay_without_rebuilding_main_window(self) -> None:
+        app = CodexControlWindowsApp.__new__(CodexControlWindowsApp)
+        app._activity_poll_inflight = True
+        app._activity_health = "Codex 状态连接正常"
+        app._activity_stale = False
+        app._activity_snapshot = ActivitySnapshot({}, 0, 0)
+        app._quitting = True
+        app.activity_store = SimpleNamespace(
+            events_path=Path("test-artifacts/missing-activity-events.jsonl"),
+            save=Mock(),
+        )
+        app.notification_state = SimpleNamespace(observe_activity=Mock())
+        app._render = Mock()
+        app._update_floating_overlay = Mock()
+        snapshot = ActivitySnapshot(
+            tasks={},
+            applied_event_count=1,
+            rejected_event_count=0,
+            applied_events=(event(2, EventType.TURN_STARTED),),
+        )
+
+        app._apply_activity_poll_result(snapshot, None)
+
+        app._update_floating_overlay.assert_called_once_with()
+        app._render.assert_not_called()
 
 
 class ActivityConnectionHealthTests(unittest.TestCase):

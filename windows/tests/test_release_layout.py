@@ -16,6 +16,10 @@ class ReleaseLayoutTests(unittest.TestCase):
 
         self.assertIn("CodexFloatingCompanion", build)
         self.assertIn("--install-hooks", install)
+        self.assertIn("Codex hooks installation did not produce four companion handlers", install)
+        self.assertIn("for ($attempt = 0; $attempt -lt 60; $attempt++)", install)
+        self.assertIn("$jsonExecutable = $installedExe.Replace", install)
+        self.assertNotIn('if ($LASTEXITCODE -ne 0) {\n    throw "Codex hooks installation failed.', install)
         self.assertIn("--uninstall-hooks", uninstall)
         self.assertIn("CodexFloatingCompanion-windows-x64.zip", package)
         self.assertIn("$LASTEXITCODE", build)

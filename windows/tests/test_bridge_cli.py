@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import inspect
 import json
 import unittest
 from datetime import datetime, timezone
@@ -60,6 +61,20 @@ class BridgeNormalizationTests(unittest.TestCase):
 
 
 class BridgeMainTests(unittest.TestCase):
+    def test_dispatch_skips_gui_when_an_instance_is_already_running(self) -> None:
+        self.assertIn("acquire_instance", inspect.signature(dispatch).parameters)
+        gui_calls: list[list[str]] = []
+
+        exit_code = dispatch(
+            [],
+            io.StringIO(""),
+            lambda argv: gui_calls.append(argv),
+            acquire_instance=lambda: False,
+        )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(gui_calls, [])
+
     def test_main_appends_normalized_event(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
